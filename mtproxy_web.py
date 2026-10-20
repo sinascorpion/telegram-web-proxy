@@ -143,16 +143,21 @@ def normalize_secret(value):
 def choose_secret(args, previous, interactive):
     candidate = args.secret if args.secret is not None else previous.get('secret')
     if interactive:
-        print('Restore an existing WEB secret: 32 hex, or 34 hex starting with dd. Input is hidden.')
+        print('Use an existing WEB secret (32 hex or dd + 32 hex), or press Enter to keep/generate:')
         while True:
-            entered = getpass.getpass('Secret (Enter = keep/generate): ').strip()
+            entered = input('Secret (Enter = keep/generate): ').strip()
             if not entered:
                 break
             try:
-                return normalize_secret(entered)
+                selected = normalize_secret(entered)
+                print(f'Proxy secret: {selected}')
+                return selected
             except ValueError:
                 print('Invalid WEB secret: enter 32 hex or dd + 32 hex; not an ee/FakeTLS secret.')
-    return normalize_secret(candidate) if candidate is not None else secrets.token_hex(16)
+    selected = normalize_secret(candidate) if candidate is not None else secrets.token_hex(16)
+    if interactive:
+        print(f'Proxy secret: {selected}')
+    return selected
 
 
 def public_ipv4():
@@ -206,14 +211,14 @@ def settings(args, previous):
         email = prompt('ACME email (optional)', email)
     if email and not re.fullmatch(r'[^\s@]+@[^\s@]+\.[^\s@]+', email):
         raise ValueError('Invalid email')
+    secret = choose_secret(args, previous, interactive)
     tag = args.ad_tag if args.ad_tag is not None else previous.get('ad_tag', '')
     if interactive:
-        print('Optional sponsor: obtain a 32-hex proxy tag from https://t.me/MTProxybot.')
+        print('Optional sponsor: register secret with https://t.me/MTProxybot to obtain a 32-hex tag.')
         tag = prompt('Sponsor tag (Enter = skip/keep)', tag)
     if tag == '-':
         tag = ''
     tag = validate_hex(tag, 'Sponsor tag', optional=True)
-    secret = choose_secret(args, previous, interactive)
     provider = args.cdn_provider or previous.get('cdn_provider') or ('cloudflare' if previous.get('cdn') else 'none')
     if args.cdn is not None and args.cdn_provider is None:
         provider = 'other' if args.cdn else 'none'

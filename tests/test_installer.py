@@ -36,13 +36,13 @@ class ValidationTests(unittest.TestCase):
         args = SimpleNamespace(secret=None)
         raw = 'abcdef0123456789' * 2
         old = dict(domain='proxy.example.com', secret=raw)
-        with patch.object(m.getpass, 'getpass', return_value='DD' + raw.upper()):
+        with patch('builtins.input', return_value='DD' + raw.upper()):
             restored = m.choose_secret(args, {}, interactive=True)
         self.assertEqual(restored, raw)
         self.assertEqual(m.link(dict(domain=old['domain'], secret=restored)), m.link(old))
-        with patch.object(m.getpass, 'getpass', return_value=''):
+        with patch('builtins.input', return_value=''):
             self.assertEqual(m.choose_secret(args, old, interactive=True), raw)
-        with patch.object(m.getpass, 'getpass', return_value=''), \
+        with patch('builtins.input', return_value=''), \
              patch.object(m.secrets, 'token_hex', return_value='12' * 16) as generator:
             self.assertEqual(m.choose_secret(args, {}, interactive=True), '12' * 16)
             generator.assert_called_once_with(16)
@@ -52,7 +52,7 @@ class ValidationTests(unittest.TestCase):
         output = io.StringIO()
         raw = '12' * 16
         invalid = 'ee' + raw
-        with patch.object(m.getpass, 'getpass', side_effect=[invalid, 'dd' + raw]), \
+        with patch('builtins.input', side_effect=[invalid, 'dd' + raw]), \
              contextlib.redirect_stdout(output):
             self.assertEqual(m.choose_secret(SimpleNamespace(secret=None), {}, True), raw)
         self.assertNotIn(invalid, output.getvalue())
