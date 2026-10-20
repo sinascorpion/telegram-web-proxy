@@ -111,7 +111,7 @@ def normalize_domain(value):
     try:
         value = value.encode('idna').decode('ascii')
     except UnicodeError as e:
-        raise ValueError('Invalid domain / دامنه نامعتبر است') from e
+        raise ValueError('Invalid domain') from e
     if len(value) > 253 or '.' not in value or any(
         not re.fullmatch(r'[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?', part)
         for part in value.split('.')
@@ -144,9 +144,8 @@ def choose_secret(args, previous, interactive):
     candidate = args.secret if args.secret is not None else previous.get('secret')
     if interactive:
         print('Restore an existing WEB secret: 32 hex, or 34 hex starting with dd. Input is hidden.')
-        print('سکرت قبلی را وارد کن؛ ورودی مخفی است. Enter = حفظ سکرت موجود یا تولید خودکار در نصب جدید.')
         while True:
-            entered = getpass.getpass('Secret / سکرت (Enter = keep/generate): ').strip()
+            entered = getpass.getpass('Secret (Enter = keep/generate): ').strip()
             if not entered:
                 break
             try:
@@ -199,19 +198,18 @@ def settings(args, previous):
     interactive = not args.non_interactive
     domain = args.domain or previous.get('domain', '')
     if interactive:
-        print('\nTelegram Web Proxy Wizard — راه‌اندازی پروکسی وب تلگرام\n')
-        domain = prompt('Domain / دامنه یا ساب‌دامنه', domain)
+        print('\nTelegram Web Proxy Wizard\n')
+        domain = prompt('Domain', domain)
     domain = normalize_domain(domain)
     email = args.email if args.email is not None else previous.get('email', '')
     if interactive:
-        email = prompt('ACME email (optional) / ایمیل تمدید SSL؛ اختیاری', email)
+        email = prompt('ACME email (optional)', email)
     if email and not re.fullmatch(r'[^\s@]+@[^\s@]+\.[^\s@]+', email):
         raise ValueError('Invalid email')
     tag = args.ad_tag if args.ad_tag is not None else previous.get('ad_tag', '')
     if interactive:
         print('Optional sponsor: obtain a 32-hex proxy tag from https://t.me/MTProxybot.')
-        print('تگ اسپانسر ۳۲ کاراکتری از @MTProxybot؛ نام کانال کافی نیست. برای حذف تگ - وارد کن.')
-        tag = prompt('Sponsor tag / تگ اسپانسر (Enter = skip/keep)', tag)
+        tag = prompt('Sponsor tag (Enter = skip/keep)', tag)
     if tag == '-':
         tag = ''
     tag = validate_hex(tag, 'Sponsor tag', optional=True)
@@ -220,22 +218,22 @@ def settings(args, previous):
     if args.cdn is not None and args.cdn_provider is None:
         provider = 'other' if args.cdn else 'none'
     if interactive:
-        provider = prompt('CDN provider / حالت اتصال: none, cloudflare, other', provider).lower()
+        provider = prompt('CDN provider: none, cloudflare, other', provider).lower()
     if provider not in ('none', 'cloudflare', 'other'):
         raise ValueError('CDN provider must be none, cloudflare or other.')
     port = args.origin_port if args.origin_port is not None else previous.get('origin_port', 443)
     if interactive:
         print('Telegram uses public HTTPS 443. A different origin port needs a CDN origin-port override.')
-        port = prompt('Origin HTTPS port / پورت HTTPS سرور مبدأ', str(port))
+        port = prompt('Origin HTTPS port', str(port))
     port = validate_origin_port(port, provider)
     ranges = args.trusted_proxy_cidr if args.trusted_proxy_cidr is not None else previous.get('trusted_proxy_cidrs', [])
     header = args.client_ip_header if args.client_ip_header is not None else previous.get('client_ip_header', '')
     if provider == 'other' and interactive:
         print('Optional: trust a client-IP header only from your CDN official CIDRs. Enter - to clear.')
-        ranges_text = prompt('Trusted CDN CIDRs (comma separated) / رنج‌های معتبر؛ اختیاری', ','.join(ranges))
+        ranges_text = prompt('Trusted CDN CIDRs (comma separated, optional)', ','.join(ranges))
         ranges = [] if ranges_text == '-' else ranges_text.split(',') if ranges_text else []
         if ranges:
-            header = prompt('CDN client-IP header / نام هدر IP کاربر', header or 'X-Forwarded-For')
+            header = prompt('CDN client-IP header', header or 'X-Forwarded-For')
         else:
             header = ''
     if provider != 'other':
@@ -643,7 +641,7 @@ def install(args):
             if old_cert != s['cert_name'] and delete_certificate(old_cert, check=False):
                 s['cert_names'].remove(old_cert)
         save(s)
-    print('\nsinascorpion — Installed / نصب شد\n' + link(s))
+    print('\nsinascorpion — Installed\n' + link(s))
     print('Management: mtproxy-web configure | status | link | uninstall')
     print('Open the management menu any time: sinascorpion-webproxy (or sudo sinascorpion-webproxy)')
     if s['cdn']:
@@ -664,7 +662,7 @@ def status():
     print(f'CDN: {s.get("cdn_provider", "none")}\nPublic port: 443\nOrigin port: {s.get("origin_port", 443)}')
     run(['systemctl', '--no-pager', '--full', 'status', 'mtproxy-web'], check=False)
     if not s.get('enabled', True):
-        print('Proxy disabled; settings and certificate retained. / پروکسی غیرفعال است')
+        print('Proxy disabled; settings and certificate retained.')
         return
     with urllib.request.urlopen(f'http://127.0.0.1:{API_PORT}/v1/runtime/web/status', timeout=5) as r:
         print(json.dumps(json.load(r), indent=2))
@@ -730,7 +728,7 @@ def set_enabled(enabled):
         run(['systemctl', 'enable', '--now', 'mtproxy-web'] if was_enabled
             else ['systemctl', 'disable', '--now', 'mtproxy-web'], check=False)
         raise
-    print('Enabled / فعال شد' if enabled else 'Disabled / غیرفعال شد؛ تنظیمات و گواهی حفظ شدند')
+    print('Enabled' if enabled else 'Disabled; settings and certificate retained.')
 
 
 def uninstall(args):
@@ -740,9 +738,9 @@ def uninstall(args):
             if args.yes or input('Remove the management command too? [y/N]: ').lower() == 'y':
                 remove_manager()
                 return True
-        print('Nothing installed / نصب فعالی پیدا نشد')
+        print('Nothing installed')
         return False
-    if not args.yes and input('Delete this proxy and secret? / حذف پروکسی و سکرت؟ [y/N]: ').strip().lower() != 'y':
+    if not args.yes and input('Delete this proxy and secret? [y/N]: ').strip().lower() != 'y':
         return False
     print('Removing only mtproxy-web-owned resources…', flush=True)
     # Decide package removal before deleting recovery state. Never remove a baseline package.
@@ -779,7 +777,7 @@ def uninstall(args):
     shutil.rmtree(ETC)
     if getattr(args, 'remove_manager', False):
         remove_manager()
-    print('Removed. SSH, firewall and existing packages were preserved. / حذف شد')
+    print('Removed. SSH, firewall and existing packages were preserved.')
     if not getattr(args, 'delete_certificate', False):
         print('Certificate/key retained for same-domain reinstall; renewal paused until reinstall.')
     if not getattr(args, 'remove_manager', False):
@@ -795,9 +793,9 @@ def change_domain():
     s = load()
     if not s:
         raise RuntimeError('Install first')
-    domain = normalize_domain(prompt('New domain / دامنه جدید', s['domain']))
+    domain = normalize_domain(prompt('New domain', s['domain']))
     if domain == s['domain']:
-        print('Domain unchanged / دامنه تغییر نکرد')
+        print('Domain unchanged')
         return
     args = configured_args()
     args.domain = domain
@@ -811,10 +809,10 @@ def change_secret():
     args = configured_args()
     args.secret = choose_secret(args, s, True)
     if args.secret == s['secret']:
-        print('Secret unchanged / سکرت تغییر نکرد')
+        print('Secret unchanged')
         return
-    print('Changing the secret invalidates existing users’ links. / لینک‌های قبلی دیگر متصل نمی‌شوند.')
-    if input('Apply new secret? / اعمال سکرت جدید؟ [y/N]: ').strip().lower() == 'y':
+    print('Changing the secret invalidates existing users’ links.')
+    if input('Apply new secret? [y/N]: ').strip().lower() == 'y':
         install(args)
 
 
@@ -823,17 +821,17 @@ def menu():
         s = load()
         state = 'not installed' if not s else 'enabled' if s.get('enabled', True) else 'disabled'
         print(f'\nTelegram Web Proxy Wizard — {state}')
-        print('1) Install / reinstall — نصب یا نصب مجدد')
-        print('2) Configure — ویزارد تنظیمات')
-        print('3) Change domain — تغییر دامنه')
-        print('4) Change secret — تغییر سکرت')
-        print('5) Disable — غیرفعال‌سازی پروکسی')
-        print('6) Enable — فعال‌سازی دوباره')
-        print('7) Status — وضعیت')
-        print('8) Show link — نمایش لینک')
-        print('9) Uninstall — حذف پروکسی')
-        print('0) Exit — خروج')
-        choice = input('Select / انتخاب: ').strip()
+        print('1) Install / reinstall')
+        print('2) Configure')
+        print('3) Change domain')
+        print('4) Change secret')
+        print('5) Disable')
+        print('6) Enable')
+        print('7) Status')
+        print('8) Show link')
+        print('9) Uninstall')
+        print('0) Exit')
+        choice = input('Select: ').strip()
         if choice == '0':
             return
         try:
@@ -858,14 +856,14 @@ def menu():
                     raise RuntimeError('Install first')
                 print(link(s))
             elif choice == '9':
-                purge = prompt('Remove installer-added packages? / حذف بسته‌های اضافه‌شده؟ y/n', 'y').lower() == 'y'
-                remove = prompt('Remove management command too? / حذف فرمان مدیریت هم؟ y/n', 'n').lower() == 'y'
-                delete_cert = prompt('Delete SSL certificate too? / حذف گواهی SSL هم؟ y/n', 'n').lower() == 'y'
+                purge = prompt('Remove installer-added packages? y/n', 'y').lower() == 'y'
+                remove = prompt('Remove management command too? y/n', 'n').lower() == 'y'
+                delete_cert = prompt('Delete SSL certificate too? y/n', 'n').lower() == 'y'
                 if uninstall(argparse.Namespace(yes=False, purge_dependencies=purge, remove_manager=remove,
                                                 delete_certificate=delete_cert)) and remove:
                     return
             else:
-                print('Invalid choice / گزینه نامعتبر')
+                print('Invalid choice')
         except (ValueError, RuntimeError, OSError, subprocess.CalledProcessError) as e:
             print(f'ERROR: {e}')
 
@@ -906,7 +904,7 @@ def parser():
 def main():
     args = parser().parse_args()
     if os.geteuid() != 0:
-        raise SystemExit('Run: sudo sinascorpion-webproxy / با دسترسی root اجرا کن')
+        raise SystemExit('Run: sudo sinascorpion-webproxy')
     import fcntl
     with open('/run/lock/mtproxy-web.lock', 'w') as lock:
         try:
@@ -936,7 +934,7 @@ def main():
             else:
                 uninstall(args)
         except (EOFError, KeyboardInterrupt):
-            print('\nClosed / خروج')
+            print('\nClosed')
             return 0
         except (ValueError, RuntimeError, OSError, subprocess.CalledProcessError) as e:
             print(f'ERROR: {e}\nIf partially installed, fix DNS/ports then rerun, or run mtproxy-web uninstall --purge-dependencies.', file=sys.stderr)
