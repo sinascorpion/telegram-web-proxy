@@ -306,6 +306,20 @@ class ManagementTests(unittest.TestCase):
         self.assertEqual([(p['domain'],p['secret'],p['ad_tag']) for p in items],
                          [(p['domain'],p['secret'],p['ad_tag']) for p in old])
 
+    def test_default_site_upgrades_legacy_page_but_preserves_custom_content(self):
+        page = m.DATA/'public/index.html'
+        m.write(page,'<!doctype html><html lang="en"><meta charset="utf-8"><title>Welcome</title><h1>Welcome</h1><p>This website is online.</p></html>\n')
+        m.install_default_site()
+        self.assertIn('data-site="sinascorpion-journal"',page.read_text())
+        self.assertNotIn('<script',page.read_text())
+        self.assertNotIn('<style',page.read_text())
+        self.assertIn('href="/journal.css"',page.read_text())
+        self.assertTrue((m.DATA/'public/journal.css').is_file())
+        custom = '<!doctype html><html><body>My own site</body></html>'
+        m.write(page,custom)
+        m.install_default_site()
+        self.assertEqual(page.read_text(),custom)
+
     def test_profile_menu_can_add_and_remove_without_replacing_other_profiles(self):
         second = {**self.old,'domain':'two.example.com','secret':'34'*16}
         with patch('builtins.input', side_effect=['1','0']), \

@@ -47,6 +47,76 @@ BACKEND_PORT = 18080
 API_PORT = 18082
 PACKAGES = ['nginx', 'certbot', 'ca-certificates', 'openssl']
 
+DEFAULT_SITE = '''<!doctype html>
+<html lang="en" data-site="sinascorpion-journal">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Practical notes on technology, the web and a calmer digital life.">
+<meta name="theme-color" content="#173b3b">
+<title>sinascorpion journal — Notes for a digital life</title>
+<style>
+:root{--paper:#f5f4ef;--ink:#183332;--muted:#536462;--line:#d7ded8;--accent:#28615c;--white:#fff;--soft:#e6ece5;--gold:#d8b477}
+*{box-sizing:border-box}html{scroll-behavior:smooth;scroll-padding-top:24px}
+body{margin:0;background:var(--paper);color:var(--ink);font:16px/1.75 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+a{color:inherit;text-decoration-thickness:1px;text-underline-offset:5px}
+a:focus-visible,summary:focus-visible{outline:3px solid var(--accent);outline-offset:5px}
+.wrap{width:min(1120px,calc(100% - 48px));margin:auto}
+.skip{position:absolute;left:16px;top:-90px;background:var(--white);padding:10px;z-index:2}.skip:focus{top:12px}
+header{border-bottom:1px solid var(--line)}.header{min-height:88px;display:flex;align-items:center;justify-content:space-between;gap:24px}
+.brand{display:flex;align-items:center;gap:5px;min-height:44px;font-size:21px;font-weight:750;letter-spacing:-1px;text-decoration:none}.brand span{font-weight:400;color:var(--muted)}
+nav{display:flex;gap:26px}nav a{display:inline-flex;align-items:center;min-height:44px;text-decoration:none;font-size:14px}nav a:hover{color:var(--accent);text-decoration:underline}
+.hero{padding:76px 0 64px;display:grid;grid-template-columns:1.3fr 1fr;gap:64px;align-items:center}
+.eyebrow{font-size:12px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:var(--accent)}
+h1,h2,h3,p{margin:0}h1{font:500 clamp(42px,5.5vw,70px)/1.08 Georgia,serif;letter-spacing:-2px;margin:18px 0 24px;max-width:650px}
+.intro{color:var(--muted);max-width:480px;font-size:18px}.hero a{display:inline-block;margin-top:24px;font-weight:650;min-height:44px}
+.art{position:relative;aspect-ratio:1.12;background:var(--ink);overflow:hidden;border-radius:3px}
+.art:before,.art:after{content:"";position:absolute;border-radius:50%;width:68%;aspect-ratio:1;border:1px solid #78918a}
+.art:before{top:12%;left:-14%;box-shadow:0 0 0 36px #ffffff08,0 0 0 72px #ffffff05}
+.art:after{bottom:-22%;right:-12%;background:var(--gold);border:0}
+.art-label{position:absolute;bottom:26px;left:28px;color:var(--white);font:italic 25px Georgia,serif;z-index:1;max-width:170px;line-height:1.3}
+.section-head{border-top:1px solid var(--ink);padding:22px 0 30px;display:flex;justify-content:space-between;align-items:baseline;gap:16px}
+h2{font:400 32px/1.2 Georgia,serif;letter-spacing:-.5px}.small{font-size:13px;color:var(--muted)}
+.posts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:32px;padding-bottom:64px}
+article{min-width:0}.category{font-size:11px;letter-spacing:1.5px;text-transform:uppercase;color:var(--accent);font-weight:750;margin-bottom:12px}
+h3{font:400 26px/1.25 Georgia,serif;margin-bottom:14px}article>p{color:var(--muted);font-size:15px}
+details{margin-top:16px;font-size:15px}summary{cursor:pointer;font-weight:650;min-height:44px;padding:8px 0;list-style-position:inside}summary:hover{color:var(--accent)}
+details p{margin-top:14px;color:var(--muted)}details ol{padding-left:22px;color:var(--muted)}
+.about{display:grid;grid-template-columns:1fr 1.5fr;gap:48px;border-top:1px solid var(--line);padding:42px 0 54px}.about p{color:var(--muted);max-width:640px}
+footer{border-top:1px solid var(--line);padding:24px 0 32px}.footer{display:flex;align-items:center;justify-content:space-between;gap:24px;color:var(--muted);font-size:13px}.footer a{display:inline-flex;align-items:center;min-height:44px}
+@media(max-width:760px){.hero{gap:32px;padding:42px 0;grid-template-columns:1fr}.art{aspect-ratio:1.8}.posts{grid-template-columns:1fr;gap:32px}.about{grid-template-columns:1fr;gap:16px}.section-head .small{display:none}article{padding-bottom:24px;border-bottom:1px solid var(--line)}.wrap{width:calc(100% - 36px)}nav{gap:16px}.header{min-height:76px}.brand{font-size:18px}h1{letter-spacing:-1.5px}.footer{flex-wrap:wrap}}
+@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header><div class="wrap header"><a class="brand" href="#">sinascorpion <span>journal</span></a><nav aria-label="Main navigation"><a href="#notes">Notes</a><a href="#about">About</a></nav></div></header>
+<main id="main" class="wrap">
+<section class="hero" aria-labelledby="title">
+<div><p class="eyebrow">Welcome to the journal</p><h1>A little clarity for your digital life.</h1><p class="intro">Useful ideas about technology, the everyday web, and making more room for what matters.</p><a href="#notes">Explore the notes <span aria-hidden="true">↗</span></a></div>
+<div class="art" aria-hidden="true"><span class="art-label">Less noise.<br>More perspective.</span></div>
+</section>
+<section id="notes" aria-labelledby="notes-title">
+<div class="section-head"><h2 id="notes-title">From the notebook</h2><span class="small">Small reads. Practical ideas.</span></div>
+<div class="posts">
+<article><p class="category">Digital habits · 3 min read</p><h3>A calmer browser starts with fewer tabs.</h3><p>A few small changes can turn your browser into a place to focus, rather than a list of unfinished tasks.</p>
+<details><summary>Read the note</summary><p>Keep a single window for the task in front of you. Put interesting articles in a reading list instead of leaving them open, and close tabs when you finish.</p><p>Review extensions occasionally. Keep the ones you use, remove the rest, and give new tools only the permissions they need. A simpler browser is easier to maintain.</p><p>At the end of the day, bookmark anything worth returning to. Tomorrow can start with a clean page.</p></details></article>
+<article><p class="category">Everyday essentials · 4 min read</p><h3>A simple backup routine you can keep.</h3><p>The best backup plan is one you can repeat. Start small, automate the routine, and check that it works.</p>
+<details><summary>Read the note</summary><p>Begin with files you cannot easily replace: photos, documents, and personal projects. Keep an additional copy on a separate device or a storage service you trust.</p><ol><li>Choose the folders that matter.</li><li>Schedule a regular backup.</li><li>Keep one copy separate from your main device.</li><li>Restore a sample file to check the process.</li></ol><p>A backup is useful only if you can recover it. Store any recovery instructions somewhere you can access when your main device is unavailable.</p></details></article>
+<article><p class="category">The open web · 3 min read</p><h3>Why lightweight websites feel better.</h3><p>Readable pages, fewer distractions, and less waiting. Sometimes the most useful improvement is to simplify.</p>
+<details><summary>Read the note</summary><p>A page does not need a large framework to share a useful idea. Clear headings, comfortable text, and straightforward navigation often do most of the work.</p><p>System fonts and small assets help pages load on slower connections. Good contrast and keyboard navigation make them easier for more people to use.</p><p>Build around the content first. Add a feature when it helps someone read, find, or understand something.</p></details></article>
+</div></section>
+<section class="about" id="about" aria-labelledby="about-title"><h2 id="about-title">A small corner of the web.</h2><p>sinascorpion journal is a collection of short, practical notes about living with technology. No account to create, no feed to keep up with. Just a few ideas to read at your own pace.</p></section>
+</main>
+<footer><div class="wrap footer"><span>sinascorpion journal</span><span>Thoughtfully simple.</span><a href="#main">Back to top ↑</a></div></footer>
+</body>
+</html>
+'''
+# Static decoys allow same-origin stylesheets, rather than inline style blocks.
+DEFAULT_STYLE = DEFAULT_SITE.split('<style>', 1)[1].split('</style>', 1)[0]
+DEFAULT_SITE = DEFAULT_SITE.replace('<style>' + DEFAULT_STYLE + '</style>',
+                                    '<link rel="stylesheet" href="/journal.css">')
+
 
 def run(args, *, capture=False, check=True):
     return subprocess.run(args, check=check, text=True,
@@ -62,6 +132,15 @@ def write(path, text, mode=0o644):
     temp.write_text(text, encoding='utf-8')
     temp.chmod(mode)
     temp.replace(path)
+
+
+def install_default_site():
+    path = DATA / 'public/index.html'
+    previous = path.read_text(encoding='utf-8') if path.exists() else ''
+    legacy = '<!doctype html><html lang="en"><meta charset="utf-8"><title>Welcome</title><h1>Welcome</h1><p>This website is online.</p></html>\n'
+    if not path.exists() or previous == legacy or 'data-site="sinascorpion-journal"' in previous:
+        write(DATA / 'public/journal.css', DEFAULT_STYLE)
+        write(path, DEFAULT_SITE)
 
 
 def save(state):
@@ -696,7 +775,7 @@ def install(args):
     # NGINX must traverse the HTTP-01 webroot even under the bootstrap's umask.
     for directory in (DATA, DATA / 'public', DATA / 'acme'):
         directory.chmod(0o755)
-    write(DATA / 'public/index.html', '<!doctype html><html lang="en"><meta charset="utf-8"><title>Welcome</title><h1>Welcome</h1><p>This website is online.</p></html>\n')
+    install_default_site()
     run(['chown', '-R', f'{USER}:{USER}', str(DATA)])
     run(['chown', f'root:{USER}', str(ETC)])
     ETC.chmod(0o750)

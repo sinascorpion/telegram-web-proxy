@@ -41,6 +41,17 @@ Platform: Ubuntu 24.04 amd64. Core: pinned 3.5.14 release with verified SHA-256.
 
 ## Live checks
 
+### Default website — 2026-10-21
+
+- All 41 automated tests pass on Ubuntu 24.04, including upgrading the previous
+  default page while preserving a custom website.
+- The default journal serves its stylesheet from the same hostname, compatible
+  with the core's static-page Content-Security-Policy. It has no external assets
+  or JavaScript. Desktop and 375px mobile layouts and article expansion were
+  checked in a browser through the public domain.
+- The page was activated with an in-process reload. Proxy state, core configuration,
+  NGINX configuration and the running core PID remained unchanged.
+
 Date: 2026-10-20. Ubuntu 24.04 amd64, approximately 1.5 GB RAM.
 
 - A clean installation in generic `other` CDN mode succeeds under umask `077`,
