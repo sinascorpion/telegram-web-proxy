@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+*.pem
+*.key
+state.json
+telemt.toml
+.env*
+test-results-private*

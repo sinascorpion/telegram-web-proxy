@@ -1,0 +1,14 @@
+name: Checks
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  checks:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: bash -n install.sh
+      - run: python3 -m py_compile mtproxy_web.py tools/probe.py
+      - run: python3 -m unittest discover -s tests -v
+      - name: ShellCheck bootstrap
+        run: shellcheck install.sh
