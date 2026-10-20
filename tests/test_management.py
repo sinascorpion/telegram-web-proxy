@@ -227,6 +227,110 @@ class ManagementTests(unittest.TestCase):
         secret.assert_called_once()
         self.assertTrue(remove.call_args.args[0].remove_manager)
 
+    def test_multiple_domains_secrets_tags_and_origin_ports(self):
+        second = {**self.old, 'domain': 'two.example.com', 'secret': '34'*16,
+                  'ad_tag': '56'*16, 'cdn': True, 'cdn_provider': 'other', 'origin_port': 2083}
+        args = m.configured_args()
+        args._profiles = [self.old, second]
+        m.install(args)
+        state = m.load()
+        self.assertEqual(len(state['profiles']), 2)
+        config, site = m.CONFIG.read_text(), m.SITE.read_text()
+        self.assertIn('[access.user_ad_tags]', config)
+        self.assertIn('user2 = "' + '56'*16 + '"', config)
+        self.assertIn('host = "two.example.com"', config)
+        self.assertEqual(site.count('upstream mtproxy_web_backend'), 1)
+        self.assertEqual(site.count('map $http_upgrade'), 1)
+        self.assertIn('listen 2083 ssl', site)
+        self.assertEqual(len(state['cert_names']), 2)
+        self.assertFalse(any(c[:2] == ['certbot', 'delete'] for c in self.calls))
+
+    def test_multiple_secrets_on_one_domain_share_one_certificate_and_vhost(self):
+        args = m.configured_args()
+        args._profiles = [self.old, {**self.old, 'secret': '34'*16, 'ad_tag': '56'*16}]
+        m.install(args)
+        self.assertEqual(m.CONFIG.read_text().count('[[web.vhosts]]'), 1)
+        self.assertEqual(m.CONFIG.read_text().count('[[web.vhosts.profiles]]'), 2)
+        self.assertEqual(m.SITE.read_text().count('ssl_certificate_key'), 1)
+        self.assertFalse(any(c[:2] == ['certbot', 'certonly'] for c in self.calls))
+
+    def test_shared_secret_with_domain_specific_tags_has_distinct_users(self):
+        items = m.validate_profiles([self.old, {**self.old, 'domain': 'two.example.com', 'ad_tag': '56'*16}])
+        config = m.telemt_config({'profiles': items})
+        self.assertIn('user = "default"', config)
+        self.assertIn('user = "user2"', config)
+        self.assertIn('user2 = "' + '56'*16 + '"', config)
+
+    def test_conflicting_same_domain_cdn_settings_and_duplicate_pairs_are_rejected(self):
+        for second in [self.old, {**self.old, 'secret': '34'*16, 'cdn_provider': 'other', 'origin_port': 2083}]:
+            with self.assertRaises(ValueError):
+                m.validate_profiles([self.old, second])
+
+    def test_edit_one_profile_keeps_other_secret_and_reuses_ssl(self):
+        args = m.configured_args()
+        args._profiles = [self.old, {**self.old, 'secret': '34'*16}]
+        m.install(args)
+        self.calls.clear()
+        args = m.configured_args()
+        args._profile_index, args.secret = 1, '56'*16
+        m.install(args)
+        items = m.load()['profiles']
+        self.assertEqual(items[0]['secret'], self.old['secret'])
+        self.assertEqual(items[1]['secret'], '56'*16)
+        self.assertFalse(any(c[:2] == ['certbot', 'certonly'] for c in self.calls))
+
+    def test_wizard_pairs_domains_secrets_and_tags_in_input_order(self):
+        args = m.parser().parse_args(['install', '--public-ip', '8.8.8.8'])
+        answers = ['one.example.com','y','two.example.com','n','',
+                   '12'*16,'y','34'*16,'56'*16,'y','78'*16,'none','443','none','443']
+        with patch('builtins.input', side_effect=answers):
+            items = m.wizard_profiles(args, {})
+        self.assertEqual([(p['domain'], p['secret'], p['ad_tag']) for p in items],
+                         [('one.example.com','12'*16,'56'*16), ('two.example.com','34'*16,'78'*16)])
+
+    def test_wizard_can_share_one_secret_and_tag_across_domains(self):
+        args = m.parser().parse_args(['install', '--public-ip', '8.8.8.8'])
+        answers = ['one.example.com','y','two.example.com','n','',
+                   '12'*16,'n','56'*16,'n','none','443','none','443']
+        with patch('builtins.input', side_effect=answers):
+            items = m.wizard_profiles(args, {})
+        self.assertEqual(items[0]['secret'], items[1]['secret'])
+        self.assertEqual(items[0]['ad_tag'], items[1]['ad_tag'])
+
+    def test_blank_reinstall_wizard_preserves_all_existing_profiles(self):
+        old = [self.old, {**self.old, 'domain':'two.example.com'},
+               {**self.old, 'domain':'three.example.com','secret':'34'*16,'ad_tag':'56'*16}]
+        args = m.parser().parse_args(['reinstall','--public-ip','8.8.8.8'])
+        with patch('builtins.input', return_value=''):
+            items = m.wizard_profiles(args, {**self.old,'profiles':old})
+        self.assertEqual([(p['domain'],p['secret'],p['ad_tag']) for p in items],
+                         [(p['domain'],p['secret'],p['ad_tag']) for p in old])
+
+    def test_profile_menu_can_add_and_remove_without_replacing_other_profiles(self):
+        second = {**self.old,'domain':'two.example.com','secret':'34'*16}
+        with patch('builtins.input', side_effect=['1','0']), \
+             patch.object(m,'wizard_profiles',return_value=[second]):
+            m.manage_profiles()
+        self.assertEqual(len(m.load()['profiles']),2)
+        with patch('builtins.input', side_effect=['3','2','y','0']):
+            m.manage_profiles()
+        self.assertEqual(len(m.load()['profiles']),1)
+        self.assertEqual(m.load()['secret'],self.old['secret'])
+
+    def test_failed_addition_restores_all_existing_profiles(self):
+        args = m.configured_args()
+        args._profiles = [self.old,{**self.old,'secret':'34'*16}]
+        m.install(args)
+        previous = m.load()
+        config,site = m.CONFIG.read_text(),m.SITE.read_text()
+        args._profiles.append({**self.old,'domain':'two.example.com','secret':'56'*16})
+        self.fail_backend = True
+        with self.assertRaises(RuntimeError):
+            m.install(args)
+        self.assertEqual(m.load()['profiles'],previous['profiles'])
+        self.assertEqual(m.CONFIG.read_text(),config)
+        self.assertEqual(m.SITE.read_text(),site)
+
 
 @unittest.skipUnless(os.name == 'posix' and shutil.which('openssl'), 'Requires Linux/OpenSSL')
 class CertificateValidationTests(unittest.TestCase):

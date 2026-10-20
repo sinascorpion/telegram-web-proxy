@@ -159,11 +159,17 @@ def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--host')
     p.add_argument('--state', type=Path)
+    p.add_argument('--profile', type=int, default=1, help='One-based profile number when reading state')
     p.add_argument('--connect-ip', help='Override DNS, retaining certificate hostname verification')
     p.add_argument('--connect-port', type=int, default=443, help='Override origin socket port for testing; Telegram WEB client links remain on public 443')
     p.add_argument('--telegram', action='store_true')
     args = p.parse_args()
     state = json.loads(args.state.read_text()) if args.state else {}
+    if state:
+        items = state.get('profiles') or [state]
+        if not 1 <= args.profile <= len(items):
+            p.error('Invalid profile number')
+        state = items[args.profile - 1]
     host = args.host or state.get('domain')
     secret = os.environ.get('MTP_SECRET') or state.get('secret')
     if not host or not secret:

@@ -2,7 +2,6 @@
 # Copyright (c) 2026 sinascorpion. SPDX-License-Identifier: GPL-3.0-or-later
 """sinascorpion Telegram WEB proxy installer. Python standard library only."""
 import argparse
-import getpass
 import hashlib
 import ipaddress
 import json
@@ -199,11 +198,13 @@ def validate_proxy_trust(cidrs, header):
     return list(map(str, nets)), header
 
 
-def settings(args, previous):
-    interactive = not args.non_interactive
+def settings(args, previous, identity=None):
+    if identity is not None:
+        previous = {**previous, **identity}
+    interactive = not args.non_interactive and identity is None
     domain = args.domain or previous.get('domain', '')
     if interactive:
-        print('\nTelegram Web Proxy Wizard\n')
+        print('\nTelegram Web Proxy Wizard')
         domain = prompt('Domain', domain)
     domain = normalize_domain(domain)
     email = args.email if args.email is not None else previous.get('email', '')
@@ -214,11 +215,14 @@ def settings(args, previous):
     secret = choose_secret(args, previous, interactive)
     tag = args.ad_tag if args.ad_tag is not None else previous.get('ad_tag', '')
     if interactive:
-        print('Optional sponsor: register secret with https://t.me/MTProxybot to obtain a 32-hex tag.')
-        tag = prompt('Sponsor tag (Enter = skip/keep)', tag)
+        print('Optional sponsor: obtain a 32-hex proxy tag from https://t.me/MTProxybot.')
+        tag = prompt('Sponsor tag', tag)
     if tag == '-':
         tag = ''
     tag = validate_hex(tag, 'Sponsor tag', optional=True)
+    if identity is not None:
+        domain, email, secret, tag = (identity[k] for k in ('domain', 'email', 'secret', 'ad_tag'))
+        interactive = not args.non_interactive
     provider = args.cdn_provider or previous.get('cdn_provider') or ('cloudflare' if previous.get('cdn') else 'none')
     if args.cdn is not None and args.cdn_provider is None:
         provider = 'other' if args.cdn else 'none'
@@ -235,7 +239,7 @@ def settings(args, previous):
     header = args.client_ip_header if args.client_ip_header is not None else previous.get('client_ip_header', '')
     if provider == 'other' and interactive:
         print('Optional: trust a client-IP header only from your CDN official CIDRs. Enter - to clear.')
-        ranges_text = prompt('Trusted CDN CIDRs (comma separated, optional)', ','.join(ranges))
+        ranges_text = prompt('Trusted CDN CIDRs (comma separated)', ','.join(ranges))
         ranges = [] if ranges_text == '-' else ranges_text.split(',') if ranges_text else []
         if ranges:
             header = prompt('CDN client-IP header', header or 'X-Forwarded-For')
@@ -255,7 +259,100 @@ def settings(args, previous):
                 origin_port=port, trusted_proxy_cidrs=ranges, client_ip_header=header)
 
 
+def profile_list(s):
+    return s.get('profiles') or ([s] if s else [])
+
+
+def validate_profiles(items):
+    if not items or len(items) > 32:
+        raise ValueError('Use 1–32 profiles.')
+    pairs, hosts = set(), {}
+    result = []
+    for item in items:
+        args = parser().parse_args(['configure', '--non-interactive'])
+        p = settings(args, item)
+        p['cert_name'] = 'mtproxy-web-' + p['domain']
+        pair = p['domain'], p['secret']
+        if pair in pairs:
+            raise ValueError('This domain/secret pair already exists.')
+        pairs.add(pair)
+        connection = tuple(json.dumps(p[k], sort_keys=True) for k in
+                           ('cdn_provider', 'origin_port', 'trusted_proxy_cidrs', 'client_ip_header', 'public_ip'))
+        if p['domain'] in hosts and hosts[p['domain']] != connection:
+            raise ValueError('Profiles sharing a domain must use the same CDN/port settings.')
+        hosts[p['domain']] = connection
+        result.append(p)
+    return result
+
+
+def wizard_profiles(args, previous):
+    old = profile_list(previous)
+    domains = []
+    while True:
+        index = len(domains)
+        domain = normalize_domain(prompt(f'Domain {index + 1}', old[index]['domain'] if index < len(old) else ''))
+        domains.append(domain)
+        if len(domains) >= 32 or prompt('Add another domain?', 'y' if index + 1 < len(old) else 'n').lower() != 'y':
+            break
+    email = prompt('SSL email (optional)', previous.get('email', ''))
+    if email and not re.fullmatch(r'[^\s@]+@[^\s@]+\.[^\s@]+', email):
+        raise ValueError('Invalid email')
+    values = []
+    for index in range(len(domains)):
+        print(f'Secret {index + 1}')
+        values.append(choose_secret(args, old[index] if index < len(old) else {}, True))
+        separate = 'y' if any(p['secret'] != values[-1] for p in old[index + 1:len(domains)]) else 'n'
+        if index + 1 < len(domains) and prompt('Separate secret for next domain? (n = reuse this for the rest)', separate).lower() != 'y':
+            values.extend([values[-1]] * (len(domains) - len(values)))
+            break
+    tags = []
+    for index in range(len(domains)):
+        tag = prompt(f'Sponsor tag {index + 1} (optional, @MTProxybot)', old[index].get('ad_tag', '') if index < len(old) else '')
+        tags.append(validate_hex('' if tag == '-' else tag, 'Sponsor tag', optional=True))
+        separate = 'y' if any(p.get('ad_tag', '') != tags[-1] for p in old[index + 1:len(domains)]) else 'n'
+        if index + 1 < len(domains) and prompt('Separate tag for next domain? (n = reuse this for the rest)', separate).lower() != 'y':
+            tags.extend([tags[-1]] * (len(domains) - len(tags)))
+            break
+    result = []
+    for index, domain in enumerate(domains):
+        print(f'CDN / HTTPS — {domain}')
+        base = old[index] if index < len(old) else result[0] if result else {}
+        if not old:
+            base = next((p for p in getattr(args, '_connection_defaults', []) if p['domain'] == domain), base)
+        identity = dict(domain=domain, email=email, secret=values[index], ad_tag=tags[index])
+        result.append(settings(args, base, identity))
+    return validate_profiles(result)
+
+
 def telemt_config(s):
+    if s.get('profiles'):
+        items = profile_list(s)
+        # Preserve the single-profile format and backwards-compatible user name.
+        base = telemt_config({**items[0], 'profiles': None})
+        if len(items) == 1:
+            return base
+        users = {}
+        for p in items:
+            key = p['secret'], p['ad_tag']
+            users.setdefault(key, 'default' if not users else f'user{len(users) + 1}')
+        user_text = '[access.users]\n' + ''.join(f'{name} = "{key[0]}"\n' for key, name in users.items())
+        tags = {users[(p['secret'], p['ad_tag'])]: p['ad_tag'] for p in items if p['ad_tag']}
+        if tags:
+            user_text += '\n[access.user_ad_tags]\n' + ''.join(f'{u} = "{tag}"\n' for u, tag in tags.items())
+        base = re.sub(r'\[access.users\].*?(?=\[server.api\])', user_text + '\n', base, flags=re.S)
+        base = re.sub(r'^ad_tag = .*\n', '', base, flags=re.M)
+        base = re.sub(r'use_middle_proxy = (?:true|false)', 'use_middle_proxy = ' + ('true' if tags else 'false'), base)
+        base = base.split('[[web.vhosts]]')[0]
+        base += '[web.limits]\nmax_vhosts = 32\nmax_profiles = 32\n\n'
+        for domain in dict.fromkeys(p['domain'] for p in items):
+            group = [p for p in items if p['domain'] == domain]
+            vhost = telemt_config({**group[0], 'profiles': None}).split('[[web.vhosts]]', 1)[1]
+            vhost = vhost.split('[[web.vhosts.profiles]]')[0]
+            base += '[[web.vhosts]]' + vhost
+            for p in group:
+                block = telemt_config({**p, 'profiles': None}).split('[[web.vhosts.profiles]]', 1)[1]
+                base += '[[web.vhosts.profiles]]' + block.replace('user = "default"', f'user = "{users[(p["secret"], p["ad_tag"])]}"')
+        return base
     tag = f'ad_tag = "{s["ad_tag"]}"\n' if s['ad_tag'] else ''
     middle = 'true' if s['ad_tag'] else 'false'
     return f'''# Managed by sinascorpion / telegram-web-proxy. WEB only; no public native MTProxy port.
@@ -317,7 +414,7 @@ max_streams_per_session = 64
 '''
 
 
-def nginx_config(s, tls=False, ranges=()):
+def nginx_config(s, tls=False, ranges=(), shared=True):
     domain = s['domain']
     trust = ''.join(f'    set_real_ip_from {net};\n' for net in ranges)
     if trust:
@@ -338,7 +435,7 @@ server {{
 '''
     if not tls:
         return http
-    return http + f'''
+    common = f'''
 upstream mtproxy_web_backend {{
     server 127.0.0.1:{BACKEND_PORT};
     keepalive 64;
@@ -347,6 +444,8 @@ map $http_upgrade $mtproxy_web_upgrade {{
     default upgrade;
     '' '';
 }}
+'''
+    return http + (common if shared else '') + f'''
 server {{
     listen {s.get('origin_port', 443)} ssl http2;
     server_name {domain};
@@ -376,6 +475,16 @@ server {{
     }}
 }}
 '''
+
+
+def nginx_sites(s, tls=False):
+    sites, seen = [], set()
+    for p in profile_list(s):
+        if p['domain'] in seen:
+            continue
+        seen.add(p['domain'])
+        sites.append(nginx_config(p, tls=tls, ranges=p.get('cloudflare_ranges', []), shared=len(seen) == 1))
+    return '\n'.join(sites)
 
 
 def cloudflare_ranges():
@@ -502,25 +611,40 @@ def check_os():
 def install(args):
     check_os()
     previous = load()
-    s = settings(args, previous)
-    domain_changed = bool(previous and s['domain'] != previous.get('domain'))
-    target_cert = 'mtproxy-web-' + s['domain']
+    if hasattr(args, '_profiles'):
+        items = validate_profiles(args._profiles)
+    elif not args.non_interactive:
+        items = wizard_profiles(args, previous)
+    else:
+        items = [dict(p) for p in profile_list(previous)]
+        index = getattr(args, '_profile_index', 0)
+        updated = settings(args, items[index] if items else {})
+        if items:
+            items[index] = updated
+        else:
+            items = [updated]
+        items = validate_profiles(items)
+    s = {**items[0], 'profiles': items}
+    target_certs = list(dict.fromkeys(p['cert_name'] for p in items))
     known_certs = owned_certificates(previous) if previous else []
-    retained = CERT_ROOT / 'mtproxy-web-retained' / (target_cert + '.conf')
-    if domain_changed and target_cert not in known_certs and not retained.exists() and (CERT_ROOT / 'renewal' / (target_cert + '.conf')).exists():
-        raise RuntimeError('The new domain has an unmanaged certificate with this name; refusing to replace it.')
-    addresses = {item[4][0] for item in socket.getaddrinfo(s['domain'], 443, type=socket.SOCK_STREAM)}
-    if not addresses:
-        raise ValueError('Domain has no DNS address')
-    if not s['cdn'] and addresses != {s['public_ip']}:
-        raise ValueError(f'DNS must contain only {s["public_ip"]}; remove incorrect A/AAAA or select CDN mode.')
-    ranges = cloudflare_ranges() if s['cdn_provider'] == 'cloudflare' else s['trusted_proxy_cidrs']
-    if s['cdn_provider'] == 'cloudflare':
-        s['client_ip_header'] = 'CF-Connecting-IP'
+    cf_ranges = None
+    for p in items:
+        retained = CERT_ROOT / 'mtproxy-web-retained' / (p['cert_name'] + '.conf')
+        if p['cert_name'] not in known_certs and not retained.exists() and (CERT_ROOT / 'renewal' / (p['cert_name'] + '.conf')).exists():
+            raise RuntimeError('An unmanaged certificate with this name already exists; refusing to replace it.')
+        addresses = {item[4][0] for item in socket.getaddrinfo(p['domain'], 443, type=socket.SOCK_STREAM)}
+        if not addresses or (not p['cdn'] and addresses != {p['public_ip']}):
+            raise ValueError(f'Check DNS/CDN settings for {p["domain"]}.')
+        if p['cdn_provider'] == 'cloudflare':
+            if cf_ranges is None:
+                cf_ranges = cloudflare_ranges()
+            p['client_ip_header'] = 'CF-Connecting-IP'
+        p['cloudflare_ranges'] = cf_ranges if p['cdn_provider'] == 'cloudflare' else p['trusted_proxy_cidrs']
+    s.update(items[0])
     if not previous:
         if run(['id', '-u', USER], capture=True, check=False).returncode == 0:
             raise RuntimeError('Service account already exists and is not managed by this installer.')
-        for port in (80, s['origin_port'], BACKEND_PORT, API_PORT):
+        for port in {80, BACKEND_PORT, API_PORT, *(p['origin_port'] for p in items)}:
             try:
                 port_available(port)
             except OSError as e:
@@ -531,20 +655,18 @@ def install(args):
                 continue
             if path.exists() or path.is_symlink():
                 raise RuntimeError(f'Unmanaged path already exists: {path}')
-        cert_name = 'mtproxy-web-' + s['domain']
-        if not retained.exists() and (CERT_ROOT / 'renewal' / (cert_name + '.conf')).exists():
-            raise RuntimeError('An unmanaged certificate with this name already exists.')
-        s.update(baseline=installed_packages(), created_user=False, cert_name=cert_name,
-                 cert_names=[cert_name], complete=False, enabled=True)
+        s.update(baseline=installed_packages(), created_user=False,
+                 cert_names=target_certs, complete=False, enabled=True)
         save(s)
     else:
         s = {**previous, **s}
-        s['cert_name'] = target_cert
-        s['cert_names'] = list(dict.fromkeys(known_certs + [target_cert]))
+        s['cert_names'] = list(dict.fromkeys(known_certs + target_certs))
         if not previous.get('complete'):
             save(s)
-    if previous and s['origin_port'] != previous.get('origin_port', 443):
-        port_available(s['origin_port'])
+    if previous:
+        old_ports = {p.get('origin_port', 443) for p in profile_list(previous)}
+        for port in {p['origin_port'] for p in items} - old_ports:
+            port_available(port)
     print(f'Installing for {s["domain"]}; public HTTPS:443; origin HTTPS:{s["origin_port"]}; sponsor: {bool(s["ad_tag"])}', flush=True)
     # Keep a root-only recovery CLI even if certificate issuance later fails.
     install_manager()
@@ -580,34 +702,45 @@ def install(args):
     ETC.chmod(0o750)
     old_config = CONFIG.read_text() if CONFIG.exists() else None
     old_site = SITE.read_text() if SITE.exists() else None
-    restored_retained = retained.exists()
-    if restored_retained:
-        renewal = CERT_ROOT / 'renewal' / (s['cert_name'] + '.conf')
-        if renewal.exists():
-            raise RuntimeError('Both retained and active renewal records exist; refusing to overwrite either.')
-        renewal.parent.mkdir(parents=True, exist_ok=True)
-        retained.replace(renewal)
-        if not any(retained.parent.iterdir()):
-            retained.parent.rmdir()
-    certificate = CERT_ROOT / 'live' / s['cert_name'] / 'fullchain.pem'
-    certificate_existed = certificate.exists()
-    reusable = certificate_existed and certificate_usable(s['cert_name'], s['domain'])
+    restored, created = [], []
     should_enable = args.action in ('install', 'reinstall') or previous.get('enabled', True)
     try:
-        if not reusable:
-            # Keep the old TLS vhost/core alive while validating the new hostname.
-            challenge_site = nginx_config(s)
-            if domain_changed and old_site:
-                challenge_site = old_site + '\n' + challenge_site
+        seen = set()
+        for p in items:
+            name = p['cert_name']
+            if name in seen:
+                continue
+            seen.add(name)
+            retained = CERT_ROOT / 'mtproxy-web-retained' / (name + '.conf')
+            if retained.exists():
+                renewal = CERT_ROOT / 'renewal' / (name + '.conf')
+                if renewal.exists():
+                    raise RuntimeError('Both retained and active renewal records exist; refusing to overwrite either.')
+                renewal.parent.mkdir(parents=True, exist_ok=True)
+                retained.replace(renewal)
+                restored.append(name)
+                if not any(retained.parent.iterdir()):
+                    retained.parent.rmdir()
+            certificate = CERT_ROOT / 'live' / name / 'fullchain.pem'
+            existed = certificate.exists()
+            if existed and certificate_usable(name, p['domain']):
+                print(f'Reusing SSL: {p["domain"]}')
+                continue
+            old_domains = {q['domain'] for q in profile_list(previous)}
+            if old_site and p['domain'] not in old_domains:
+                challenge_site = old_site + '\n' + nginx_sites(
+                    {'profiles': [q for q in items if q['domain'] not in old_domains]})
+            else:
+                challenge_site = nginx_sites(s)
             set_site(challenge_site)
+            if not existed:
+                created.append(name)
             command = ['certbot', 'certonly', '--non-interactive', '--agree-tos', '--webroot',
-                       '-w', str(DATA / 'acme'), '--cert-name', s['cert_name'], '-d', s['domain']]
-            command += ['--email', s['email']] if s['email'] else ['--register-unsafely-without-email']
-            if certificate_existed:
+                       '-w', str(DATA / 'acme'), '--cert-name', name, '-d', p['domain']]
+            command += ['--email', p['email']] if p['email'] else ['--register-unsafely-without-email']
+            if existed:
                 command.append('--force-renewal')
             run(command)
-        else:
-            print('Reusing the existing valid certificate; no new issuance requested.')
         write(CONFIG, telemt_config(s), 0o640)
         run(['chown', f'root:{USER}', str(CONFIG)])
         write(UNIT, SERVICE)
@@ -616,14 +749,14 @@ def install(args):
         if previous:
             run(['systemctl', 'restart', 'mtproxy-web'])
         wait_backend()
-        set_site(nginx_config(s, tls=should_enable, ranges=ranges))
+        set_site(nginx_sites(s, tls=should_enable))
         if not should_enable:
             run(['systemctl', 'disable', '--now', 'mtproxy-web'])
         write(HOOK, '#!/bin/sh\nnginx -t && systemctl reload nginx\n', 0o755)
         run(['systemctl', 'enable', '--now', 'nginx', 'certbot.timer'])
         s['complete'] = True
         s['enabled'] = should_enable
-        s['cloudflare_ranges'] = ranges
+        s['cloudflare_ranges'] = items[0]['cloudflare_ranges']
         save(s)
     except BaseException:
         if previous.get('complete') and old_config and old_site:
@@ -635,18 +768,18 @@ def install(args):
             if previous.get('enabled', True):
                 run(['systemctl', 'restart', 'mtproxy-web'], check=False)
             save(previous)
-            if domain_changed:
-                if restored_retained:
-                    retain_certificate(s['cert_name'])
-                elif not certificate_existed:
-                    delete_certificate(s['cert_name'], check=False)
+            for name in restored:
+                if name not in known_certs:
+                    retain_certificate(name)
+            for name in created:
+                if name not in known_certs and name not in restored:
+                    delete_certificate(name, check=False)
         raise
-    if domain_changed:
-        for old_cert in known_certs:
-            if old_cert != s['cert_name'] and delete_certificate(old_cert, check=False):
-                s['cert_names'].remove(old_cert)
-        save(s)
-    print('\nsinascorpion — Installed\n' + link(s))
+    for old_cert in known_certs:
+        if old_cert not in target_certs and delete_certificate(old_cert, check=False):
+            s['cert_names'].remove(old_cert)
+    save(s)
+    print('\nsinascorpion — Installed' + '\n'.join(link(p) for p in items))
     print('Management: mtproxy-web configure | status | link | uninstall')
     print('Open the management menu any time: sinascorpion-webproxy (or sudo sinascorpion-webproxy)')
     if s['cdn']:
@@ -666,6 +799,8 @@ def status():
     print(f'Domain: {s["domain"]}\nTelemt: {TELEMT_VERSION}\nSponsor configured: {bool(s["ad_tag"])}')
     print(f'CDN: {s.get("cdn_provider", "none")}\nPublic port: 443\nOrigin port: {s.get("origin_port", 443)}')
     run(['systemctl', '--no-pager', '--full', 'status', 'mtproxy-web'], check=False)
+    for index, p in enumerate(profile_list(s), 1):
+        print(f'Profile {index}: {p["domain"]} / {p.get("cdn_provider", "none")} / origin {p.get("origin_port", 443)} / sponsor {bool(p.get("ad_tag"))}')
     if not s.get('enabled', True):
         print('Proxy disabled; settings and certificate retained.')
         return
@@ -721,10 +856,10 @@ def set_enabled(enabled):
         if enabled:
             run(['systemctl', 'enable', '--now', 'mtproxy-web'])
             wait_backend()
-            set_site(nginx_config(s, tls=True, ranges=s.get('cloudflare_ranges', [])))
+            set_site(nginx_sites(s, tls=True))
         else:
             # Retain only HTTP-01 so certificates can renew while the proxy is off.
-            set_site(nginx_config(s, tls=False))
+            set_site(nginx_sites(s, tls=False))
             run(['systemctl', 'disable', '--now', 'mtproxy-web'])
         s['enabled'] = enabled
         save(s)
@@ -733,7 +868,7 @@ def set_enabled(enabled):
         run(['systemctl', 'enable', '--now', 'mtproxy-web'] if was_enabled
             else ['systemctl', 'disable', '--now', 'mtproxy-web'], check=False)
         raise
-    print('Enabled' if enabled else 'Disabled; settings and certificate retained.')
+    print('Enabled' if enabled else 'Disabled')
 
 
 def uninstall(args):
@@ -745,7 +880,7 @@ def uninstall(args):
                 return True
         print('Nothing installed')
         return False
-    if not args.yes and input('Delete this proxy and secret? [y/N]: ').strip().lower() != 'y':
+    if not args.yes and input('Delete this proxy and secret?').strip().lower() != 'y':
         return False
     print('Removing only mtproxy-web-owned resources…', flush=True)
     # Decide package removal before deleting recovery state. Never remove a baseline package.
@@ -798,11 +933,14 @@ def change_domain():
     s = load()
     if not s:
         raise RuntimeError('Install first')
-    domain = normalize_domain(prompt('New domain', s['domain']))
-    if domain == s['domain']:
+    index = select_profile(s)
+    p = profile_list(s)[index]
+    domain = normalize_domain(prompt('New domain', p['domain']))
+    if domain == p['domain']:
         print('Domain unchanged')
         return
     args = configured_args()
+    args._profile_index = index
     args.domain = domain
     install(args)
 
@@ -812,12 +950,63 @@ def change_secret():
     if not s:
         raise RuntimeError('Install first')
     args = configured_args()
-    args.secret = choose_secret(args, s, True)
-    if args.secret == s['secret']:
+    args._profile_index = select_profile(s)
+    p = profile_list(s)[args._profile_index]
+    args.secret = choose_secret(args, p, True)
+    if args.secret == p['secret']:
         print('Secret unchanged')
         return
     print('Changing the secret invalidates existing users’ links.')
-    if input('Apply new secret? [y/N]: ').strip().lower() == 'y':
+    if input('Apply new secret?').strip().lower() == 'y':
+        install(args)
+
+
+def select_profile(s):
+    items = profile_list(s)
+    if len(items) == 1:
+        return 0
+    for index, p in enumerate(items, 1):
+        print(f'{index}) {p["domain"]} — {p.get("cdn_provider", "none")}')
+    index = int(prompt('Profile number', '1')) - 1
+    if not 0 <= index < len(items):
+        raise ValueError('Invalid profile number')
+    return index
+
+
+def manage_profiles():
+    while True:
+        s = load()
+        if not s or not s.get('complete'):
+            raise RuntimeError('Install first')
+        items = [dict(p) for p in profile_list(s)]
+        for index, p in enumerate(items, 1):
+            print(f'{index}) {p["domain"]} — {p.get("cdn_provider", "none")}')
+        print('1) Add')
+        choice = input('Select').strip()
+        if choice == '0':
+            return
+        if choice == '4':
+            print('\n'.join(link(p) for p in items))
+            continue
+        args = configured_args()
+        if choice == '1':
+            interactive = parser().parse_args(['configure'])
+            interactive._connection_defaults = items
+            items.extend(wizard_profiles(interactive, {}))
+        elif choice == '2':
+            index = select_profile(s)
+            items[index] = settings(parser().parse_args(['configure']), items[index])
+        elif choice == '3':
+            if len(items) == 1:
+                raise ValueError('Use Uninstall to remove the last profile.')
+            index = select_profile(s)
+            if prompt('Remove this profile?', 'n').lower() != 'y':
+                continue
+            items.pop(index)
+        else:
+            print('Invalid choice')
+            continue
+        args._profiles = items
         install(args)
 
 
@@ -835,8 +1024,9 @@ def menu():
         print('7) Status')
         print('8) Show link')
         print('9) Uninstall')
+        print('10) Domains / secrets / tags')
         print('0) Exit')
-        choice = input('Select: ').strip()
+        choice = input('Select').strip()
         if choice == '0':
             return
         try:
@@ -859,14 +1049,16 @@ def menu():
             elif choice == '8':
                 if not s:
                     raise RuntimeError('Install first')
-                print(link(s))
+                print('\n'.join(link(p) for p in profile_list(s)))
             elif choice == '9':
-                purge = prompt('Remove installer-added packages? y/n', 'y').lower() == 'y'
-                remove = prompt('Remove management command too? y/n', 'n').lower() == 'y'
-                delete_cert = prompt('Delete SSL certificate too? y/n', 'n').lower() == 'y'
+                purge = prompt('Remove installer-added packages?', 'y').lower() == 'y'
+                remove = prompt('Remove management command too?', 'n').lower() == 'y'
+                delete_cert = prompt('Delete SSL certificate too?', 'n').lower() == 'y'
                 if uninstall(argparse.Namespace(yes=False, purge_dependencies=purge, remove_manager=remove,
                                                 delete_certificate=delete_cert)) and remove:
                     return
+            elif choice == '10':
+                manage_profiles()
             else:
                 print('Invalid choice')
         except (ValueError, RuntimeError, OSError, subprocess.CalledProcessError) as e:
@@ -898,6 +1090,7 @@ def parser():
     sub.add_parser('disable')
     sub.add_parser('change-domain')
     sub.add_parser('change-secret')
+    sub.add_parser('profiles')
     u = sub.add_parser('uninstall')
     u.add_argument('--yes', action='store_true')
     u.add_argument('--purge-dependencies', action='store_true', help='Also purge packages added by this installer; keep all baseline packages')
@@ -931,11 +1124,13 @@ def main():
                 change_domain()
             elif args.action == 'change-secret':
                 change_secret()
+            elif args.action == 'profiles':
+                manage_profiles()
             elif args.action == 'link':
                 state = load()
                 if not state:
                     raise RuntimeError('Not installed')
-                print(link(state))
+                print('\n'.join(link(p) for p in profile_list(state)))
             else:
                 uninstall(args)
         except (EOFError, KeyboardInterrupt):

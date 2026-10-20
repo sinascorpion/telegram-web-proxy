@@ -2,255 +2,69 @@
 
 [فارسی](README.fa.md) · Maintained by **sinascorpion**
 
-One-command interactive setup for Telegram WEB proxy: automatic HTTPS, certificate
-renewal, provider-neutral CDN configuration, optional sponsor tags and clean uninstall.
-
-```text
-Telegram WEB client → public HTTPS :443 → optional CDN → origin HTTPS :PORT
-                                                      → private proxy core → Telegram
-```
+Easy Telegram WEB proxy setup with automatic SSL, multiple domains and secrets,
+CDN support, optional sponsor tags and a management menu.
 
 ## Install
 
-Use a dedicated Ubuntu server (Ubuntu 24.04 is recommended), root access,
-an A record for your domain, and reachable HTTP port 80 for certificate issuance
-and renewal. Keep SSH open. Public Telegram WEB connections require HTTPS **443**.
-Ubuntu 22.04 and arm64 are supported code paths; live testing uses Ubuntu 24.04 amd64.
+Use a dedicated Ubuntu server (Ubuntu 24.04 is recommended). Point your domain
+to the server and allow ports **80** and **443**. Use a Telegram client that
+supports `tg://webproxy`.
 
 ```bash
 curl -fsSLo /tmp/telegram-web-proxy-install.sh https://raw.githubusercontent.com/sinascorpion/telegram-web-proxy/main/install.sh && sudo bash /tmp/telegram-web-proxy-install.sh
 ```
 
-The bootstrap opens the management menu. Select **1** to install. The setup wizard asks for:
+Select **1 — Install / reinstall**. Enter your domains, secrets and optional
+sponsor tags, then choose the CDN and origin HTTPS port for each domain.
+Press Enter at a secret prompt to generate one or keep the existing value.
+Existing raw 32-hex or `dd`-prefixed WEB secrets are accepted.
 
-1. Domain/subdomain.
-2. Optional certificate contact email.
-3. Optional 32-hex sponsor tag.
-4. Optional existing WEB secret (hidden input); Enter keeps it or generates one on a new install.
-5. Connection mode: `none` (direct), `cloudflare`, or `other` CDN.
-6. Origin HTTPS port, default `443`.
-7. For another CDN, optional trusted IP ranges and its client-IP header.
+## Multiple secrets and domains
 
-It restores or generates a secret, downloads a checksum-verified core, creates a restricted
-system service, obtains and renews a Let's Encrypt certificate, and prints a
-`tg://webproxy` link. No server password or CDN API token is requested.
+Run several domains and secrets on the same server/IP, using different CDN
+providers and sponsor tags. Multiple secrets on one domain are supported too.
 
-For the simplest first issuance, temporarily point DNS directly at the origin.
-Issuance can also work behind a CDN if its HTTP-01 challenge path reaches the
-origin unchanged, without cache, login, challenge or a redirect to unavailable TLS.
-An incorrect origin AAAA record must be removed.
+During setup, choose whether to add another domain. Then enter the secrets and
+tags in the same order: first domain → first secret → first tag. You can also
+share one secret or tag across the domains, or start with one profile and add
+more later.
 
-```bash
-# Cloudflare with automatic trusted-range discovery
-sudo bash /tmp/telegram-web-proxy-install.sh install --non-interactive \
-  --domain proxy.example.com --cdn-provider cloudflare
+Open **10 — Domains / secrets / tags** in the management menu to add, edit or
+remove profiles and display their links.
 
-# Another CDN, with the normal 443 origin port
-sudo bash /tmp/telegram-web-proxy-install.sh install --non-interactive \
-  --domain proxy.example.com --cdn-provider other
-```
-
-Optional flags: `--public-ip ORIGIN_IPV4` (otherwise detected using api.ipify.org),
-`--email you@example.com`, `--ad-tag YOUR_32_HEX_TAG`, `--secret YOUR_RAW_32_HEX_SECRET`.
-`--cdn` is shorthand for provider-neutral `other` mode; `--no-cdn` selects direct mode.
-
-## Move to a replacement server without changing users' links
-
-Keep a safe copy of the domain and the secret from `mtproxy-web link` before a
-server is lost. On the replacement server, use the same domain and paste that
-existing WEB secret into the wizard. It accepts either the raw **32 hex** value
-or the complete **`dd` + 32 hex** secret from this installer's link. Input is
-hidden and invalid input is retried. An empty answer preserves an existing
-secret; on a fresh installation it generates one automatically.
-
-Update DNS or your CDN's origin address to the new server and reproduce the
-required origin port/CDN routing. With the same domain and `dd` secret, this
-installer produces the **identical `tg://webproxy` link**. Users reconnect using
-their existing configuration; live sessions do not migrate. A new valid TLS
-certificate is issued for the same domain; copying the old certificate/key is
-not necessary. Supply the new origin IPv4, never restore the old server IP.
-
-This restores this installer's root-path `dd` WEB links. Native `ee` FakeTLS
-secrets, different public secret modes and custom path links are not interchangeable.
-The installer cannot recover a lost secret from the domain alone. Re-enter other
-settings such as the sponsor tag if required; tag registration may need an IP update.
-
-## CDN compatibility
-
-This is not limited to Cloudflare. Other CDNs, including Fastly or ArvanCloud,
-can be used **when the chosen service and plan meet the following contract**:
-
-- Public HTTPS port 443 with a valid certificate, verified TLS to the origin.
-- Original Host, TLS SNI, exact paths/query strings and authentication/carrier
-  headers preserved. Do not rewrite the bridge or API endpoints.
-- POST and DELETE requests, streamed bodies and long polls above 75 seconds.
-- HTTP/2 for HTTPS lanes; WebSocket passthrough for WSS modes.
-- Bypass cache, page optimization, CAPTCHA, JS challenges and access-login pages
-  for the proxy hostname. Use one origin or whole-session affinity.
-- HTTP-01 challenge files remain reachable on public HTTP port 80 for renewal.
-
-Opening the right ports alone is not sufficient. A CDN's WebSocket feature can
-require separate enablement or a qualifying plan. For example, consult
-[Fastly WebSockets passthrough](https://www.fastly.com/documentation/guides/concepts/real-time-messaging/websockets-tunnel/).
-Cloudflare has been live-tested; other providers are configurable, not certified
-against every provider/plan/account configuration.
-
-Cloudflare mode fetches its official network ranges and trusts `CF-Connecting-IP`
-only from those peers. Use Full (strict) origin TLS and enable WebSockets.
-Re-run configure to refresh the range list.
-
-For other providers, no forwarded header is trusted by default. Traffic still
-works, but per-IP accounting sees CDN edge IPs. To retain real client IPs, supply
-the provider's official ranges and the header it reliably overwrites:
+## Management
 
 ```bash
-sudo mtproxy-web configure --non-interactive --cdn-provider other \
-  --trusted-proxy-cidr PROVIDER_CIDR --client-ip-header PROVIDER_HEADER
-```
-
-Repeat `--trusted-proxy-cidr` for each range. Do not trust `/0`, an arbitrary
-client header, or a header your provider does not sanitize. The wizard accepts
-`-` to clear custom ranges. The installer does not edit your CDN account or DNS.
-
-## HTTPS ports: client vs origin
-
-**Telegram Desktop WEB proxies currently require public port 443.** Their links
-omit a port; putting `:2083`, `:2096`, or `:2053` in the host does not enable a
-different public client port. This restriction is enforced by the client:
-[official proxy-data implementation](https://github.com/telegramdesktop/tdesktop/blob/dev/Telegram/SourceFiles/mtproto/mtproto_proxy_data.cpp)
-and [WEB view checks](https://github.com/telegramdesktop/tdesktop/blob/dev/Telegram/SourceFiles/mtproto/web_proxy/web_proxy_webview.cpp).
-
-The **origin** TLS listener can use another port:
-
-```bash
-sudo mtproxy-web configure --non-interactive --cdn-provider other --origin-port 2083
-```
-
-Then configure your CDN to send **public HTTPS 443 → origin HTTPS 2083**, with the
-original hostname as Host and TLS SNI. Support for an origin-port override depends
-on the provider and plan; merely changing the server's listening port does not
-configure this mapping. The `tg://webproxy` link remains unchanged.
-
-The same applies to 2053, 2087, 2096, 8443 or another available TLS origin port.
-Cloudflare lists [443, 2053, 2083, 2087, 2096 and 8443 as HTTPS proxy ports](https://developers.cloudflare.com/fundamentals/reference/network-ports/),
-but that list does not override Telegram's fixed public WEB port. Direct mode
-therefore refuses an origin port other than 443. SSH, HTTP and internal service
-ports are reserved. HTTP port 80 remains required for HTTP-01 renewal.
-
-## Manage
-
-After installation, open the complete management menu with one command:
-
-```bash
-sinascorpion-webproxy
-# If you are not root:
 sudo sinascorpion-webproxy
 ```
 
-The installer displays this command after the first installation. The menu offers
-install/reinstall, the settings wizard, change domain, change secret, disable,
-enable, status, link display and uninstall. Existing installations can get the
-new menu by re-running the one-command bootstrap and selecting install/reinstall.
+The menu offers reinstall, configuration, domain/secret changes, enable/disable,
+status, links, profile management and uninstall. To update an older installation,
+rerun the install command and select **1**.
 
-Reinstall downloads the checksum-pinned core again while retaining the domain,
-secret and other saved settings. Domain changes obtain the new certificate before
-switching the public site; a failed activation restores previous settings. Set up
-the new domain's DNS/CDN first. A different hostname or secret changes users' links.
+Valid SSL is reused on the same server/domain, including after a secret change.
+Uninstall keeps certificates by default; choose certificate deletion for a full
+cleanup. Keep the same domain and secret when restoring existing client links.
 
-Disable stops the core, disables its automatic startup and removes the public
-HTTPS proxy listener while retaining settings and certificates. Only the HTTP-01
-webroot remains for certificate renewal. Enable restores the proxy. Changing
-settings while disabled does not silently enable it; install/reinstall does.
+## CDN and sponsor tags
 
-Uninstall is available in the menu and asks whether to purge installer-added
-packages and whether to remove the management command too. By default the small
-management command remains so you can install again. Removing the manager as
-well closes the menu; use the bootstrap again for a future installation.
+Choose `none`, `cloudflare` or `other`. For other providers, enter trusted
+client-IP ranges/header only if needed. Set verified origin TLS and allow
+WebSockets, long requests and uncached proxy traffic.
 
-Equivalent non-menu commands:
+Public connections use **443**. Other origin HTTPS ports, such as **2053, 2083
+or 2096**, require your CDN to map public 443 to that origin port. DNS and CDN
+account settings are configured by you.
 
-```bash
-sudo sinascorpion-webproxy configure
-sudo sinascorpion-webproxy reinstall --non-interactive
-sudo sinascorpion-webproxy change-domain
-sudo sinascorpion-webproxy change-secret
-sudo sinascorpion-webproxy disable
-sudo sinascorpion-webproxy enable
-sudo sinascorpion-webproxy link
-sudo sinascorpion-webproxy status
-sudo certbot renew --dry-run --no-random-sleep-on-renew
-sudo sinascorpion-webproxy uninstall --purge-dependencies --remove-manager
-# Also delete the SSL certificate/key (optional):
-sudo sinascorpion-webproxy uninstall --purge-dependencies --remove-manager --delete-certificate
-```
+Get an optional 32-hex sponsor tag from [@MTProxybot](https://t.me/MTProxybot).
+A channel username alone is insufficient. Visible sponsorship requires a valid
+registration and client support.
 
-The older `mtproxy-web` command remains an alias for compatibility.
-The wizard preserves the current secret and certificate. Enter `-` to remove
-a sponsor tag. `--yes` skips the
-uninstall prompt. Uninstall removes this proxy's settings, secret,
-service and data. Dependency purge removes only packages added by the installer,
-and refuses a removal that would also remove a pre-existing OS package. SSH and
-firewall settings are preserved. Package logs/account metadata may remain.
+## Tests and license
 
-By default uninstall retains the certificate and private key for a same-domain
-reinstall, and pauses their renewal while the proxy is absent. Reinstall restores
-renewal and reuses the certificate if it is unexpired, matches the domain and has
-the matching private key. Changing the proxy secret never requires a new SSL
-certificate. Expired, missing or unusable certificates require issuance/renewal.
-Choose certificate deletion in the menu or use `--delete-certificate` to remove
-it too. This reuse applies to certificates previously managed by this installer;
-unrelated certificate records are not overwritten.
-
-## Multiple secrets and blocking
-
-Separate secrets can isolate access: if one user's credential leaks, it can be
-revoked or rotated without rotating everyone's credential in a multi-user setup.
-They do not provide different public IPs, domains or CDN routes. A block of the
-shared public endpoint affects all secrets using that endpoint. More secrets alone
-are therefore not protection against IP/domain blocking. This installer currently
-manages one shared WEB secret; replacing it invalidates existing links.
-
-An interrupted installation retains recovery state where possible: fix the cause
-and rerun, or uninstall. A failed managed reconfiguration restores previous active
-proxy/NGINX settings. Use a clean dedicated server; occupied required ports or
-unmanaged project paths cause a first installation to stop.
-
-## Sponsor channel
-
-Obtain a **32-hex proxy tag** from [@MTProxybot](https://t.me/MTProxybot), then enter
-it in the wizard. A channel username alone is not a tag. Follow the bot's current
-registration flow; any required legacy-proxy validation must be completed
-separately because this project exposes WEB transport only.
-
-A tag enables Telegram middle proxies; direct-to-DC operation has no sponsored
-channel support. Actual channel display depends on a valid bot registration and
-Telegram client/server behavior. Without a supplied live tag, visible sponsorship
-is not considered tested.
-
-## Verification and scope
-
-Use a Telegram build that supports `tg://webproxy`. Older `tg://proxy` clients are
-not compatible. Negotiated carriers are `https`, `https-lanes`, `websocket`, and
-`websocket-lanes`, with `https` as the compatibility fallback.
-
-```bash
-python3 -m unittest discover -s tests -v
-sudo python3 tools/probe.py --state /etc/mtproxy-web/state.json --telegram
-# Test an origin override without claiming a non-443 Telegram client link:
-sudo python3 tools/probe.py --state /etc/mtproxy-web/state.json \
-  --connect-ip ORIGIN_IPV4 --connect-port 2083 --telegram
-```
-
-The real-Telegram probe needs `python3-cryptography`. It checks public certificate
-validation, the decoy, wrong-secret rejection, authenticated sessions, all four
-carriers and matching `req_pq_multi`/`resPQ` nonces. It logs no proxy credentials,
-does not log into Telegram, and sends no messages. See [TESTING.md](TESTING.md).
-
-The core/API listen only on loopback. Secrets are stored in root-only state and
-a service-readable config; access logs are disabled. This installer does not
-change SSH, UFW, iptables, DNS or CDN account settings. Core version/checksums are
-pinned. Review downloaded code before running it as root.
-Dependency copyrights and licensing are documented in [NOTICE.md](NOTICE.md).
+Test details and platform coverage: [TESTING.md](TESTING.md).
+License: [LICENSE](LICENSE) · Dependency notices: [NOTICE.md](NOTICE.md).
 
 ## Donate
 

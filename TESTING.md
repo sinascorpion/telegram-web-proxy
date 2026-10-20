@@ -7,7 +7,7 @@ Platform: Ubuntu 24.04 amd64. Core: pinned 3.5.14 release with verified SHA-256.
 - Domain and configuration-injection rejection, secret/tag validation.
 - Restoring raw/dd-prefixed WEB secrets keeps the exact link; Enter preserves an
   existing secret or generates one only on a new installation. Invalid interactive
-  input retries without printing the supplied secret.
+  input retries without echoing rejected secrets.
 - Sponsor configuration selects middle-proxy routing.
 - WEB and management listeners remain loopback-only.
 - Public links and inner relay destination stay on 443 even with another origin port.
@@ -21,6 +21,23 @@ Platform: Ubuntu 24.04 amd64. Core: pinned 3.5.14 release with verified SHA-256.
 - Disable/enable, failed activation, menu action routing and retaining/removing
   the management command are covered by isolated Linux lifecycle tests.
 - Unix permission checks cover the executable under restrictive bootstrap umask.
+
+## Multiple profiles — 2026-10-21
+
+- All 40 automated tests pass on Ubuntu 24.04.
+- Lifecycle/wizard tests cover ordered domain/secret/tag pairing, shared values,
+  blank-input preservation on reinstall, legacy-state migration, add/edit/remove,
+  certificate sharing, independent CDN/origin ports and rollback of a failed addition.
+- Four profiles ran concurrently in one real pinned core on Ubuntu 24.04: three
+  hostnames, two secrets on one hostname, and a shared secret with different tags
+  on separate hostnames. All four carriers completed real Telegram nonce exchanges
+  for every profile through NGINX/TLS, on three origin HTTPS sockets.
+- The isolated run used temporary certificates trusted only by the test probes
+  and loopback listeners. It validates multi-host origin routing; it does not claim
+  new end-to-end tests through multiple commercial CDN accounts or visible sponsor
+  channels. No production ACME certificates were requested.
+- The existing live installation's state, core config and NGINX config hashes
+  remained identical. Temporary processes and test files were removed afterward.
 
 ## Live checks
 
