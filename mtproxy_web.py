@@ -2,6 +2,7 @@
 # Copyright (c) 2026 sinascorpion. SPDX-License-Identifier: GPL-3.0-or-later
 """sinascorpion Telegram WEB proxy installer. Python standard library only."""
 import argparse
+import getpass
 import hashlib
 import ipaddress
 import json
@@ -103,6 +104,29 @@ def validate_hex(value, label, optional=False):
     return value
 
 
+def normalize_secret(value):
+    value = value.strip().lower()
+    if len(value) == 34 and value.startswith('dd'):
+        value = value[2:]
+    return validate_hex(value, 'WEB secret')
+
+
+def choose_secret(args, previous, interactive):
+    candidate = args.secret if args.secret is not None else previous.get('secret')
+    if interactive:
+        print('Restore an existing WEB secret: 32 hex, or 34 hex starting with dd. Input is hidden.')
+        print('سکرت قبلی را وارد کن؛ ورودی مخفی است. Enter = حفظ سکرت موجود یا تولید خودکار در نصب جدید.')
+        while True:
+            entered = getpass.getpass('Secret / سکرت (Enter = keep/generate): ').strip()
+            if not entered:
+                break
+            try:
+                return normalize_secret(entered)
+            except ValueError:
+                print('Invalid WEB secret: enter 32 hex or dd + 32 hex; not an ee/FakeTLS secret.')
+    return normalize_secret(candidate) if candidate is not None else secrets.token_hex(16)
+
+
 def public_ipv4():
     with urllib.request.urlopen('https://api.ipify.org', timeout=15) as r:
         value = r.read(64).decode().strip()
@@ -162,7 +186,7 @@ def settings(args, previous):
     if tag == '-':
         tag = ''
     tag = validate_hex(tag, 'Sponsor tag', optional=True)
-    secret = validate_hex(args.secret or previous.get('secret') or secrets.token_hex(16), 'Secret')
+    secret = choose_secret(args, previous, interactive)
     provider = args.cdn_provider or previous.get('cdn_provider') or ('cloudflare' if previous.get('cdn') else 'none')
     if args.cdn is not None and args.cdn_provider is None:
         provider = 'other' if args.cdn else 'none'
@@ -619,7 +643,7 @@ def parser():
         s.add_argument('--domain')
         s.add_argument('--email')
         s.add_argument('--ad-tag', help='32 hex from @MTProxybot; - removes existing sponsor tag')
-        s.add_argument('--secret', help='Raw 32 hex; omit to generate/keep')
+        s.add_argument('--secret', help='Existing WEB secret: raw 32 hex or dd + 32 hex; omit to generate/keep')
         s.add_argument('--public-ip', help='Origin public IPv4; defaults to automatic detection')
         s.add_argument('--cdn', action=argparse.BooleanOptionalAction, default=None)
         s.add_argument('--cdn-provider', choices=['none', 'cloudflare', 'other'], help='Provider-neutral CDN mode; Cloudflare can populate trusted IP ranges automatically')

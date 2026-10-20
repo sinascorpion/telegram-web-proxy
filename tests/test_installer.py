@@ -31,6 +31,36 @@ class ValidationTests(unittest.TestCase):
         self.assertEqual(m.validate_hex('AB' * 16, 'tag'), 'ab' * 16)
         self.assertEqual(m.validate_hex('', 'tag', optional=True), '')
 
+    @patch('builtins.print')
+    def test_restoring_existing_web_secret_keeps_the_exact_link(self, _print):
+        args = SimpleNamespace(secret=None)
+        raw = 'abcdef0123456789' * 2
+        old = dict(domain='proxy.example.com', secret=raw)
+        with patch.object(m.getpass, 'getpass', return_value='DD' + raw.upper()):
+            restored = m.choose_secret(args, {}, interactive=True)
+        self.assertEqual(restored, raw)
+        self.assertEqual(m.link(dict(domain=old['domain'], secret=restored)), m.link(old))
+        with patch.object(m.getpass, 'getpass', return_value=''):
+            self.assertEqual(m.choose_secret(args, old, interactive=True), raw)
+        with patch.object(m.getpass, 'getpass', return_value=''), \
+             patch.object(m.secrets, 'token_hex', return_value='12' * 16) as generator:
+            self.assertEqual(m.choose_secret(args, {}, interactive=True), '12' * 16)
+            generator.assert_called_once_with(16)
+
+    def test_invalid_restoration_secret_retries_without_echoing_it(self):
+        import contextlib
+        output = io.StringIO()
+        raw = '12' * 16
+        invalid = 'ee' + raw
+        with patch.object(m.getpass, 'getpass', side_effect=[invalid, 'dd' + raw]), \
+             contextlib.redirect_stdout(output):
+            self.assertEqual(m.choose_secret(SimpleNamespace(secret=None), {}, True), raw)
+        self.assertNotIn(invalid, output.getvalue())
+        for bad in ['0' * 32, 'dd' + '0' * 32, 'ee' + raw, 'g' * 32, '']:
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                m.choose_secret(SimpleNamespace(secret=bad), {}, False)
+        self.assertEqual(m.choose_secret(SimpleNamespace(secret='dd' + raw), {}, False), raw)
+
     def test_web_only_and_sponsor_enables_middle_proxy(self):
         import tomllib
         state = dict(domain='proxy.example.com', public_ip='8.8.8.8', secret='12' * 16,

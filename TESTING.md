@@ -5,6 +5,9 @@ Platform: Ubuntu 24.04 amd64. Core: pinned 3.5.14 release with verified SHA-256.
 ## Automated checks
 
 - Domain and configuration-injection rejection, secret/tag validation.
+- Restoring raw/dd-prefixed WEB secrets keeps the exact link; Enter preserves an
+  existing secret or generates one only on a new installation. Invalid interactive
+  input retries without printing the supplied secret.
 - Sponsor configuration selects middle-proxy routing.
 - WEB and management listeners remain loopback-only.
 - Public links and inner relay destination stay on 443 even with another origin port.

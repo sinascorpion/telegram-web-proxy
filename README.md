@@ -26,11 +26,12 @@ The wizard asks for:
 1. Domain/subdomain.
 2. Optional certificate contact email.
 3. Optional 32-hex sponsor tag.
-4. Connection mode: `none` (direct), `cloudflare`, or `other` CDN.
-5. Origin HTTPS port, default `443`.
-6. For another CDN, optional trusted IP ranges and its client-IP header.
+4. Optional existing WEB secret (hidden input); Enter keeps it or generates one on a new install.
+5. Connection mode: `none` (direct), `cloudflare`, or `other` CDN.
+6. Origin HTTPS port, default `443`.
+7. For another CDN, optional trusted IP ranges and its client-IP header.
 
-It generates a secret, downloads a checksum-verified core, creates a restricted
+It restores or generates a secret, downloads a checksum-verified core, creates a restricted
 system service, obtains and renews a Let's Encrypt certificate, and prints a
 `tg://webproxy` link. No server password or CDN API token is requested.
 
@@ -52,6 +53,27 @@ sudo bash /tmp/telegram-web-proxy-install.sh install --non-interactive \
 Optional flags: `--public-ip ORIGIN_IPV4` (otherwise detected using api.ipify.org),
 `--email you@example.com`, `--ad-tag YOUR_32_HEX_TAG`, `--secret YOUR_RAW_32_HEX_SECRET`.
 `--cdn` is shorthand for provider-neutral `other` mode; `--no-cdn` selects direct mode.
+
+## Move to a replacement server without changing users' links
+
+Keep a safe copy of the domain and the secret from `mtproxy-web link` before a
+server is lost. On the replacement server, use the same domain and paste that
+existing WEB secret into the wizard. It accepts either the raw **32 hex** value
+or the complete **`dd` + 32 hex** secret from this installer's link. Input is
+hidden and invalid input is retried. An empty answer preserves an existing
+secret; on a fresh installation it generates one automatically.
+
+Update DNS or your CDN's origin address to the new server and reproduce the
+required origin port/CDN routing. With the same domain and `dd` secret, this
+installer produces the **identical `tg://webproxy` link**. Users reconnect using
+their existing configuration; live sessions do not migrate. A new valid TLS
+certificate is issued for the same domain; copying the old certificate/key is
+not necessary. Supply the new origin IPv4, never restore the old server IP.
+
+This restores this installer's root-path `dd` WEB links. Native `ee` FakeTLS
+secrets, different public secret modes and custom path links are not interchangeable.
+The installer cannot recover a lost secret from the domain alone. Re-enter other
+settings such as the sponsor tag if required; tag registration may need an IP update.
 
 ## CDN compatibility
 
