@@ -310,11 +310,14 @@ class ManagementTests(unittest.TestCase):
         page = m.DATA/'public/index.html'
         m.write(page,'<!doctype html><html lang="en"><meta charset="utf-8"><title>Welcome</title><h1>Welcome</h1><p>This website is online.</p></html>\n')
         m.install_default_site()
-        self.assertIn('data-site="sinascorpion-journal"',page.read_text())
+        self.assertIn('data-site="everyday-notes"',page.read_text())
         self.assertNotIn('<script',page.read_text())
         self.assertNotIn('<style',page.read_text())
-        self.assertIn('href="/journal.css"',page.read_text())
-        self.assertTrue((m.DATA/'public/journal.css').is_file())
+        self.assertIn('href="/site.css"',page.read_text())
+        self.assertTrue((m.DATA/'public/site.css').is_file())
+        self.assertNotIn('sinascorpion',page.read_text().lower())
+        self.assertNotIn('journal',page.read_text().lower())
+        self.assertNotIn('proxy',page.read_text().lower())
         custom = '<!doctype html><html><body>My own site</body></html>'
         m.write(page,custom)
         m.install_default_site()
@@ -330,6 +333,17 @@ class ManagementTests(unittest.TestCase):
             m.manage_profiles()
         self.assertEqual(len(m.load()['profiles']),1)
         self.assertEqual(m.load()['secret'],self.old['secret'])
+
+    def test_previous_branded_site_is_migrated_and_old_stylesheet_removed(self):
+        page = m.DATA/'public/index.html'
+        m.write(page, m.DEFAULT_SITE.replace('everyday-notes','sinascorpion-journal'))
+        old = m.DATA/'public/journal.css'
+        m.write(old,m.DEFAULT_STYLE)
+        m.install_default_site()
+        self.assertNotIn('sinascorpion',page.read_text().lower())
+        self.assertIn('Everyday Notes',page.read_text())
+        self.assertFalse(old.exists())
+        self.assertEqual((m.DATA/'public/site.css').read_text(),m.DEFAULT_STYLE)
 
     def test_failed_addition_restores_all_existing_profiles(self):
         args = m.configured_args()

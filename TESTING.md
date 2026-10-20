@@ -43,8 +43,10 @@ Platform: Ubuntu 24.04 amd64. Core: pinned 3.5.14 release with verified SHA-256.
 
 ### Default website — 2026-10-21
 
-- All 41 automated tests pass on Ubuntu 24.04, including upgrading the previous
+- All 42 automated tests pass on Ubuntu 24.04, including upgrading the previous
   default page while preserving a custom website.
+- The public template uses the neutral name Everyday Notes. Its HTML contains no
+  maintainer name or proxy branding. Migration removes the previous owned stylesheet.
 - The default journal serves its stylesheet from the same hostname, compatible
   with the core's static-page Content-Security-Policy. It has no external assets
   or JavaScript. Desktop and 375px mobile layouts and article expansion were

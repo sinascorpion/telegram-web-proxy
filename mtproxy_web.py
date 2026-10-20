@@ -48,13 +48,13 @@ API_PORT = 18082
 PACKAGES = ['nginx', 'certbot', 'ca-certificates', 'openssl']
 
 DEFAULT_SITE = '''<!doctype html>
-<html lang="en" data-site="sinascorpion-journal">
+<html lang="en" data-site="everyday-notes">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="description" content="Practical notes on technology, the web and a calmer digital life.">
 <meta name="theme-color" content="#173b3b">
-<title>sinascorpion journal — Notes for a digital life</title>
+<title>Everyday Notes — Notes for a digital life</title>
 <style>
 :root{--paper:#f5f4ef;--ink:#183332;--muted:#536462;--line:#d7ded8;--accent:#28615c;--white:#fff;--soft:#e6ece5;--gold:#d8b477}
 *{box-sizing:border-box}html{scroll-behavior:smooth;scroll-padding-top:24px}
@@ -90,10 +90,10 @@ footer{border-top:1px solid var(--line);padding:24px 0 32px}.footer{display:flex
 </head>
 <body>
 <a class="skip" href="#main">Skip to content</a>
-<header><div class="wrap header"><a class="brand" href="#">sinascorpion <span>journal</span></a><nav aria-label="Main navigation"><a href="#notes">Notes</a><a href="#about">About</a></nav></div></header>
+<header><div class="wrap header"><a class="brand" href="#">Everyday Notes</a><nav aria-label="Main navigation"><a href="#notes">Notes</a><a href="#about">About</a></nav></div></header>
 <main id="main" class="wrap">
 <section class="hero" aria-labelledby="title">
-<div><p class="eyebrow">Welcome to the journal</p><h1>A little clarity for your digital life.</h1><p class="intro">Useful ideas about technology, the everyday web, and making more room for what matters.</p><a href="#notes">Explore the notes <span aria-hidden="true">↗</span></a></div>
+<div><p class="eyebrow">Welcome to Everyday Notes</p><h1>A little clarity for your digital life.</h1><p class="intro">Useful ideas about technology, the everyday web, and making more room for what matters.</p><a href="#notes">Explore the notes <span aria-hidden="true">↗</span></a></div>
 <div class="art" aria-hidden="true"><span class="art-label">Less noise.<br>More perspective.</span></div>
 </section>
 <section id="notes" aria-labelledby="notes-title">
@@ -106,16 +106,16 @@ footer{border-top:1px solid var(--line);padding:24px 0 32px}.footer{display:flex
 <article><p class="category">The open web · 3 min read</p><h3>Why lightweight websites feel better.</h3><p>Readable pages, fewer distractions, and less waiting. Sometimes the most useful improvement is to simplify.</p>
 <details><summary>Read the note</summary><p>A page does not need a large framework to share a useful idea. Clear headings, comfortable text, and straightforward navigation often do most of the work.</p><p>System fonts and small assets help pages load on slower connections. Good contrast and keyboard navigation make them easier for more people to use.</p><p>Build around the content first. Add a feature when it helps someone read, find, or understand something.</p></details></article>
 </div></section>
-<section class="about" id="about" aria-labelledby="about-title"><h2 id="about-title">A small corner of the web.</h2><p>sinascorpion journal is a collection of short, practical notes about living with technology. No account to create, no feed to keep up with. Just a few ideas to read at your own pace.</p></section>
+<section class="about" id="about" aria-labelledby="about-title"><h2 id="about-title">A small corner of the web.</h2><p>Everyday Notes is a collection of short, practical notes about living with technology. No account to create, no feed to keep up with. Just a few ideas to read at your own pace.</p></section>
 </main>
-<footer><div class="wrap footer"><span>sinascorpion journal</span><span>Thoughtfully simple.</span><a href="#main">Back to top ↑</a></div></footer>
+<footer><div class="wrap footer"><span>Everyday Notes</span><span>Thoughtfully simple.</span><a href="#main">Back to top ↑</a></div></footer>
 </body>
 </html>
 '''
 # Static decoys allow same-origin stylesheets, rather than inline style blocks.
 DEFAULT_STYLE = DEFAULT_SITE.split('<style>', 1)[1].split('</style>', 1)[0]
 DEFAULT_SITE = DEFAULT_SITE.replace('<style>' + DEFAULT_STYLE + '</style>',
-                                    '<link rel="stylesheet" href="/journal.css">')
+                                    '<link rel="stylesheet" href="/site.css">')
 
 
 def run(args, *, capture=False, check=True):
@@ -138,9 +138,13 @@ def install_default_site():
     path = DATA / 'public/index.html'
     previous = path.read_text(encoding='utf-8') if path.exists() else ''
     legacy = '<!doctype html><html lang="en"><meta charset="utf-8"><title>Welcome</title><h1>Welcome</h1><p>This website is online.</p></html>\n'
-    if not path.exists() or previous == legacy or 'data-site="sinascorpion-journal"' in previous:
-        write(DATA / 'public/journal.css', DEFAULT_STYLE)
+    if not path.exists() or previous == legacy or any(marker in previous for marker in
+            ('data-site="sinascorpion-journal"', 'data-site="everyday-notes"')):
+        write(DATA / 'public/site.css', DEFAULT_STYLE)
         write(path, DEFAULT_SITE)
+        old_stylesheet = DATA / 'public/journal.css'
+        if old_stylesheet.is_file() and old_stylesheet.read_text(encoding='utf-8') == DEFAULT_STYLE:
+            old_stylesheet.unlink()
 
 
 def save(state):
