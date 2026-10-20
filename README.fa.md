@@ -99,6 +99,14 @@ sinascorpion-webproxy
 کرد که فرمان مدیریت باقی بماند یا حذف شود. پیش‌فرض، نگه‌داشتن فرمان مدیریت برای نصب
 بعدی است؛ برای حذف همه‌چیز از جمله فرمان مدیریت، گزینهٔ مربوط را تأیید کن.
 
+گواهی SSL و کلید خصوصی آن به‌صورت پیش‌فرض هنگام حذف حفظ می‌شوند تا نصب دوباره روی
+همان دامنه به صدور جدید نیاز نداشته باشد. تمدید در زمان حذف متوقف و هنگام نصب دوباره
+فعال می‌شود. گواهی باید منقضی نشده باشد، دامنه را پوشش دهد و کلید خصوصی درست داشته
+باشد. تغییر سکرت به SSL جدید نیاز ندارد. برای گواهی منقضی، مفقود یا غیرقابل‌استفاده،
+صدور یا تمدید لازم است. برای حذف گواهی هم، گزینهٔ مربوط در منو یا
+`--delete-certificate` را انتخاب کن. استفادهٔ مجدد مربوط به گواهی‌های مدیریت‌شده
+توسط همین نصب‌کننده است؛ گواهی برنامه‌های دیگر بازنویسی نمی‌شود.
+
 ```bash
 sudo sinascorpion-webproxy configure
 sudo sinascorpion-webproxy change-domain
@@ -109,6 +117,7 @@ sudo sinascorpion-webproxy link
 sudo sinascorpion-webproxy status
 sudo certbot renew --dry-run --no-random-sleep-on-renew
 sudo sinascorpion-webproxy uninstall --purge-dependencies --remove-manager
+sudo sinascorpion-webproxy uninstall --purge-dependencies --remove-manager --delete-certificate
 ```
 
 فرمان قبلی `mtproxy-web` هم برای سازگاری حفظ شده است.

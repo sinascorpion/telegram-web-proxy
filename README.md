@@ -180,15 +180,26 @@ sudo sinascorpion-webproxy link
 sudo sinascorpion-webproxy status
 sudo certbot renew --dry-run --no-random-sleep-on-renew
 sudo sinascorpion-webproxy uninstall --purge-dependencies --remove-manager
+# Also delete the SSL certificate/key (optional):
+sudo sinascorpion-webproxy uninstall --purge-dependencies --remove-manager --delete-certificate
 ```
 
 The older `mtproxy-web` command remains an alias for compatibility.
 The wizard preserves the current secret and certificate. Enter `-` to remove
 a sponsor tag. `--yes` skips the
-uninstall prompt. Uninstall removes this proxy's certificate, settings, secret,
+uninstall prompt. Uninstall removes this proxy's settings, secret,
 service and data. Dependency purge removes only packages added by the installer,
 and refuses a removal that would also remove a pre-existing OS package. SSH and
 firewall settings are preserved. Package logs/account metadata may remain.
+
+By default uninstall retains the certificate and private key for a same-domain
+reinstall, and pauses their renewal while the proxy is absent. Reinstall restores
+renewal and reuses the certificate if it is unexpired, matches the domain and has
+the matching private key. Changing the proxy secret never requires a new SSL
+certificate. Expired, missing or unusable certificates require issuance/renewal.
+Choose certificate deletion in the menu or use `--delete-certificate` to remove
+it too. This reuse applies to certificates previously managed by this installer;
+unrelated certificate records are not overwritten.
 
 ## Multiple secrets and blocking
 

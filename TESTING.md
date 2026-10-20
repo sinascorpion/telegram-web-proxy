@@ -47,6 +47,17 @@ are covered by configuration/validation tests, not separate live deployments.
 
 ## Reproduce
 
+### Certificate reuse — 2026-10-21
+
+- All 30 automated tests pass on Ubuntu 24.04.
+- Same-domain uninstall/reinstall retains the certificate/key by default, pauses
+  its renewal record and restores it on reinstall, including with a new secret.
+  Lifecycle tests assert that no certificate issuance command is executed.
+- Explicit certificate deletion and replacement of unusable certificates are tested.
+- Real OpenSSL checks in isolated Ubuntu test directories cover the matching
+  certificate/key, wrong hostname, missing/mismatched key, expiry and validity start.
+  No additional production ACME certificate is requested for these checks.
+
 ### Management acceptance — 2026-10-21
 
 - All 21 automated tests pass on Ubuntu 24.04.

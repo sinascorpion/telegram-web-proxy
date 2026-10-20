@@ -46,7 +46,7 @@ HOOK = CERT_ROOT / 'renewal-hooks/deploy/mtproxy-web-reload'
 USER = 'mtproxy-web'
 BACKEND_PORT = 18080
 API_PORT = 18082
-PACKAGES = ['nginx', 'certbot', 'ca-certificates']
+PACKAGES = ['nginx', 'certbot', 'ca-certificates', 'openssl']
 
 
 def run(args, *, capture=False, check=True):
@@ -503,7 +503,8 @@ def install(args):
     domain_changed = bool(previous and s['domain'] != previous.get('domain'))
     target_cert = 'mtproxy-web-' + s['domain']
     known_certs = owned_certificates(previous) if previous else []
-    if domain_changed and target_cert not in known_certs and (CERT_ROOT / 'renewal' / (target_cert + '.conf')).exists():
+    retained = CERT_ROOT / 'mtproxy-web-retained' / (target_cert + '.conf')
+    if domain_changed and target_cert not in known_certs and not retained.exists() and (CERT_ROOT / 'renewal' / (target_cert + '.conf')).exists():
         raise RuntimeError('The new domain has an unmanaged certificate with this name; refusing to replace it.')
     addresses = {item[4][0] for item in socket.getaddrinfo(s['domain'], 443, type=socket.SOCK_STREAM)}
     if not addresses:
@@ -528,7 +529,7 @@ def install(args):
             if path.exists() or path.is_symlink():
                 raise RuntimeError(f'Unmanaged path already exists: {path}')
         cert_name = 'mtproxy-web-' + s['domain']
-        if (CERT_ROOT / 'renewal' / (cert_name + '.conf')).exists():
+        if not retained.exists() and (CERT_ROOT / 'renewal' / (cert_name + '.conf')).exists():
             raise RuntimeError('An unmanaged certificate with this name already exists.')
         s.update(baseline=installed_packages(), created_user=False, cert_name=cert_name,
                  cert_names=[cert_name], complete=False, enabled=True)
@@ -576,11 +577,21 @@ def install(args):
     ETC.chmod(0o750)
     old_config = CONFIG.read_text() if CONFIG.exists() else None
     old_site = SITE.read_text() if SITE.exists() else None
+    restored_retained = retained.exists()
+    if restored_retained:
+        renewal = CERT_ROOT / 'renewal' / (s['cert_name'] + '.conf')
+        if renewal.exists():
+            raise RuntimeError('Both retained and active renewal records exist; refusing to overwrite either.')
+        renewal.parent.mkdir(parents=True, exist_ok=True)
+        retained.replace(renewal)
+        if not any(retained.parent.iterdir()):
+            retained.parent.rmdir()
     certificate = CERT_ROOT / 'live' / s['cert_name'] / 'fullchain.pem'
     certificate_existed = certificate.exists()
+    reusable = certificate_existed and certificate_usable(s['cert_name'], s['domain'])
     should_enable = args.action in ('install', 'reinstall') or previous.get('enabled', True)
     try:
-        if not certificate_existed:
+        if not reusable:
             # Keep the old TLS vhost/core alive while validating the new hostname.
             challenge_site = nginx_config(s)
             if domain_changed and old_site:
@@ -589,7 +600,11 @@ def install(args):
             command = ['certbot', 'certonly', '--non-interactive', '--agree-tos', '--webroot',
                        '-w', str(DATA / 'acme'), '--cert-name', s['cert_name'], '-d', s['domain']]
             command += ['--email', s['email']] if s['email'] else ['--register-unsafely-without-email']
+            if certificate_existed:
+                command.append('--force-renewal')
             run(command)
+        else:
+            print('Reusing the existing valid certificate; no new issuance requested.')
         write(CONFIG, telemt_config(s), 0o640)
         run(['chown', f'root:{USER}', str(CONFIG)])
         write(UNIT, SERVICE)
@@ -617,8 +632,11 @@ def install(args):
             if previous.get('enabled', True):
                 run(['systemctl', 'restart', 'mtproxy-web'], check=False)
             save(previous)
-            if domain_changed and not certificate_existed:
-                delete_certificate(s['cert_name'], check=False)
+            if domain_changed:
+                if restored_retained:
+                    retain_certificate(s['cert_name'])
+                elif not certificate_existed:
+                    delete_certificate(s['cert_name'], check=False)
         raise
     if domain_changed:
         for old_cert in known_certs:
@@ -650,6 +668,30 @@ def status():
         return
     with urllib.request.urlopen(f'http://127.0.0.1:{API_PORT}/v1/runtime/web/status', timeout=5) as r:
         print(json.dumps(json.load(r), indent=2))
+
+
+def certificate_usable(name, domain):
+    live = CERT_ROOT / 'live' / name
+    cert, key = live / 'fullchain.pem', live / 'privkey.pem'
+    if not cert.exists() or not key.exists():
+        return False
+    # The locally retained managed certificate is the trust anchor here. Verify
+    # enforces hostname and validity dates with a meaningful failure exit status.
+    valid = run(['openssl', 'verify', '-trusted', str(cert), '-partial_chain',
+                 '-verify_hostname', domain, str(cert)], capture=True, check=False)
+    if valid.returncode:
+        return False
+    public = run(['openssl', 'x509', '-in', str(cert), '-pubkey', '-noout'], capture=True, check=False)
+    private = run(['openssl', 'pkey', '-in', str(key), '-pubout'], capture=True, check=False)
+    return public.returncode == private.returncode == 0 and public.stdout == private.stdout
+
+
+def retain_certificate(name):
+    renewal = CERT_ROOT / 'renewal' / (name + '.conf')
+    if renewal.exists():
+        destination = CERT_ROOT / 'mtproxy-web-retained' / renewal.name
+        destination.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        renewal.replace(destination)
 
 
 def delete_certificate(name, check=True):
@@ -700,7 +742,7 @@ def uninstall(args):
                 return True
         print('Nothing installed / نصب فعالی پیدا نشد')
         return False
-    if not args.yes and input('Delete this proxy, secret and certificate? / حذف کامل؟ [y/N]: ').strip().lower() != 'y':
+    if not args.yes and input('Delete this proxy and secret? / حذف پروکسی و سکرت؟ [y/N]: ').strip().lower() != 'y':
         return False
     print('Removing only mtproxy-web-owned resources…', flush=True)
     # Decide package removal before deleting recovery state. Never remove a baseline package.
@@ -720,7 +762,10 @@ def uninstall(args):
         if run(['systemctl', 'is-active', '--quiet', 'nginx'], check=False).returncode == 0:
             run(['systemctl', 'reload', 'nginx'])
     for name in owned_certificates(s):
-        delete_certificate(name)
+        if getattr(args, 'delete_certificate', False):
+            delete_certificate(name)
+        else:
+            retain_certificate(name)
     UNIT.unlink(missing_ok=True)
     run(['systemctl', 'daemon-reload'])
     run(['systemctl', 'reset-failed'], check=False)
@@ -735,6 +780,8 @@ def uninstall(args):
     if getattr(args, 'remove_manager', False):
         remove_manager()
     print('Removed. SSH, firewall and existing packages were preserved. / حذف شد')
+    if not getattr(args, 'delete_certificate', False):
+        print('Certificate/key retained for same-domain reinstall; renewal paused until reinstall.')
     if not getattr(args, 'remove_manager', False):
         print('Management menu retained: sinascorpion-webproxy')
     return True
@@ -813,7 +860,9 @@ def menu():
             elif choice == '9':
                 purge = prompt('Remove installer-added packages? / حذف بسته‌های اضافه‌شده؟ y/n', 'y').lower() == 'y'
                 remove = prompt('Remove management command too? / حذف فرمان مدیریت هم؟ y/n', 'n').lower() == 'y'
-                if uninstall(argparse.Namespace(yes=False, purge_dependencies=purge, remove_manager=remove)) and remove:
+                delete_cert = prompt('Delete SSL certificate too? / حذف گواهی SSL هم؟ y/n', 'n').lower() == 'y'
+                if uninstall(argparse.Namespace(yes=False, purge_dependencies=purge, remove_manager=remove,
+                                                delete_certificate=delete_cert)) and remove:
                     return
             else:
                 print('Invalid choice / گزینه نامعتبر')
@@ -850,6 +899,7 @@ def parser():
     u.add_argument('--yes', action='store_true')
     u.add_argument('--purge-dependencies', action='store_true', help='Also purge packages added by this installer; keep all baseline packages')
     u.add_argument('--remove-manager', action='store_true', help='Also remove both management commands')
+    u.add_argument('--delete-certificate', action='store_true', help='Delete the certificate/key instead of retaining them for reinstall')
     return p
 
 

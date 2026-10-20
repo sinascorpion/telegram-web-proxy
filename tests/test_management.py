@@ -4,6 +4,7 @@ import importlib.util
 import io
 import json
 import os
+import shutil
 from pathlib import Path
 import subprocess
 import tempfile
@@ -52,6 +53,7 @@ class ManagementTests(unittest.TestCase):
         self.stack.enter_context(patch.object(m, 'set_site', side_effect=lambda text: m.write(m.SITE, text)))
         self.stack.enter_context(patch.object(m.socket, 'getaddrinfo', return_value=[(2,1,6,'',('8.8.8.8',443))]))
         self.stack.enter_context(patch.object(m.shutil, 'which', return_value='/mock/bin'))
+        self.stack.enter_context(patch.object(m, 'certificate_usable', return_value=True))
 
     def make_certificate(self, name):
         m.write(m.CERT_ROOT/'live'/name/'fullchain.pem', 'test certificate')
@@ -168,17 +170,53 @@ class ManagementTests(unittest.TestCase):
         m.install_manager()
         m.uninstall(m.parser().parse_args(['uninstall','--yes','--purge-dependencies']))
         self.assertTrue(m.owned_manager())
+        self.assertTrue((m.CERT_ROOT/'live'/self.old['cert_name']/'fullchain.pem').exists())
+        self.assertTrue((m.CERT_ROOT/'mtproxy-web-retained'/(self.old['cert_name']+'.conf')).exists())
+        self.assertFalse((m.CERT_ROOT/'renewal'/(self.old['cert_name']+'.conf')).exists())
+        self.calls.clear()
         args = m.parser().parse_args(['install','--non-interactive','--domain',self.old['domain'],
-                                      '--public-ip','8.8.8.8','--secret',self.old['secret']])
+                                      '--public-ip','8.8.8.8','--secret','34'*16])
         with patch.object(m, 'port_available'), \
              patch.object(m, 'install_binary', side_effect=lambda: m.write(m.BIN, 'fresh core', 0o755)):
             m.install(args)
         self.assertTrue(m.load()['complete'])
         self.assertTrue(m.load()['enabled'])
-        self.assertEqual(m.load()['secret'], self.old['secret'])
+        self.assertEqual(m.load()['secret'], '34'*16)
+        self.assertFalse(any(c[:2] == ['certbot', 'certonly'] for c in self.calls))
+        self.assertTrue((m.CERT_ROOT/'renewal'/(self.old['cert_name']+'.conf')).exists())
+        self.assertFalse((m.CERT_ROOT/'mtproxy-web-retained').exists())
+
+    def test_secret_change_reuses_certificate_without_issuance(self):
+        args = m.parser().parse_args(['configure', '--non-interactive', '--secret', '34'*16])
+        m.install(args)
+        self.assertEqual(m.load()['secret'], '34'*16)
+        self.assertFalse(any(c[:2] == ['certbot', 'certonly'] for c in self.calls))
+
+    def test_unusable_certificate_is_replaced(self):
+        with patch.object(m, 'certificate_usable', return_value=False):
+            m.install(m.configured_args())
+        issuance = next(c for c in self.calls if c[:2] == ['certbot', 'certonly'])
+        self.assertIn('--force-renewal', issuance)
+
+    def test_failed_domain_change_returns_cached_certificate_to_paused_state(self):
+        name = 'mtproxy-web-new.example.com'
+        self.make_certificate(name)
+        m.retain_certificate(name)
+        self.fail_backend = True
+        with self.assertRaises(RuntimeError):
+            m.install(self.domain_args())
+        self.assertEqual(m.load()['domain'], self.old['domain'])
+        self.assertTrue((m.CERT_ROOT/'mtproxy-web-retained'/(name+'.conf')).exists())
+        self.assertFalse((m.CERT_ROOT/'renewal'/(name+'.conf')).exists())
+        self.assertFalse(any(c[:2] == ['certbot', 'certonly'] for c in self.calls))
+
+    def test_certificate_can_be_deleted_explicitly_on_uninstall(self):
+        m.uninstall(m.parser().parse_args(['uninstall', '--yes', '--delete-certificate']))
+        self.assertFalse((m.CERT_ROOT/'live'/self.old['cert_name']).exists())
+        self.assertFalse((m.CERT_ROOT/'mtproxy-web-retained').exists())
 
     def test_menu_routes_selected_actions_and_stops_after_full_removal(self):
-        with patch('builtins.input', side_effect=['5','6','3','4','9','y','y']), \
+        with patch('builtins.input', side_effect=['5','6','3','4','9','y','y','n']), \
              patch.object(m, 'set_enabled') as enabled, \
              patch.object(m, 'change_domain') as domain, \
              patch.object(m, 'change_secret') as secret, \
@@ -188,6 +226,50 @@ class ManagementTests(unittest.TestCase):
         domain.assert_called_once()
         secret.assert_called_once()
         self.assertTrue(remove.call_args.args[0].remove_manager)
+
+
+@unittest.skipUnless(os.name == 'posix' and shutil.which('openssl'), 'Requires Linux/OpenSSL')
+class CertificateValidationTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.patch = patch.object(m, 'CERT_ROOT', self.root)
+        self.patch.start()
+        self.addCleanup(self.patch.stop)
+        self.live = self.root/'live/test'
+        self.live.mkdir(parents=True)
+        subprocess.run(['openssl', 'req', '-x509', '-newkey', 'rsa:2048', '-nodes',
+                        '-keyout', str(self.live/'privkey.pem'), '-out', str(self.live/'fullchain.pem'),
+                        '-days', '1', '-subj', '/CN=valid.example.com',
+                        '-addext', 'subjectAltName=DNS:valid.example.com'],
+                       check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    def test_matching_certificate_and_private_key_can_be_reused(self):
+        self.assertTrue(m.certificate_usable('test', 'valid.example.com'))
+
+    def test_wrong_domain_is_not_reused(self):
+        self.assertFalse(m.certificate_usable('test', 'other.example.com'))
+
+    def test_expired_and_not_yet_valid_certificates_are_not_reused(self):
+        real_run = m.run
+        for timestamp in ('1', '4102444800'):
+            def at_time(command, **kwargs):
+                if command[:2] == ['openssl', 'verify']:
+                    command = command[:2] + ['-attime', timestamp] + command[2:]
+                return real_run(command, **kwargs)
+            with self.subTest(timestamp=timestamp), patch.object(m, 'run', side_effect=at_time):
+                self.assertFalse(m.certificate_usable('test', 'valid.example.com'))
+
+    def test_missing_key_is_not_reused(self):
+        (self.live/'privkey.pem').unlink()
+        self.assertFalse(m.certificate_usable('test', 'valid.example.com'))
+
+    def test_mismatched_private_key_is_not_reused(self):
+        subprocess.run(['openssl', 'genpkey', '-algorithm', 'RSA', '-pkeyopt', 'rsa_keygen_bits:2048',
+                        '-out', str(self.live/'privkey.pem')], check=True,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        self.assertFalse(m.certificate_usable('test', 'valid.example.com'))
 
 
 if __name__ == '__main__':
