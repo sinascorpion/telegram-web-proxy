@@ -35,11 +35,14 @@ STATE = ETC / 'state.json'
 CONFIG = ETC / 'telemt.toml'
 DATA = Path('/var/lib/mtproxy-web')
 CLI = Path('/usr/local/sbin/mtproxy-web')
+MANAGER = Path('/usr/local/bin/sinascorpion-webproxy')
+MANAGER_SCRIPT = '#!/bin/sh\n# sinascorpion-webproxy management entry point\nexec /usr/local/sbin/mtproxy-web "$@"\n'
 BIN = Path('/usr/local/lib/mtproxy-web/telemt')
 UNIT = Path('/etc/systemd/system/mtproxy-web.service')
 SITE = Path('/etc/nginx/sites-available/mtproxy-web.conf')
 ENABLED = Path('/etc/nginx/sites-enabled/mtproxy-web.conf')
-HOOK = Path('/etc/letsencrypt/renewal-hooks/deploy/mtproxy-web-reload')
+CERT_ROOT = Path('/etc/letsencrypt')
+HOOK = CERT_ROOT / 'renewal-hooks/deploy/mtproxy-web-reload'
 USER = 'mtproxy-web'
 BACKEND_PORT = 18080
 API_PORT = 18082
@@ -69,6 +72,32 @@ def save(state):
 
 def load():
     return json.loads(STATE.read_text()) if STATE.exists() else {}
+
+
+def owned_manager():
+    return (MANAGER.is_file() and MANAGER.read_text() == MANAGER_SCRIPT
+            and CLI.is_file() and 'Copyright (c) 2026 sinascorpion' in CLI.read_text()[:200])
+
+
+def install_manager():
+    if MANAGER.exists() and MANAGER.read_text() != MANAGER_SCRIPT:
+        raise RuntimeError(f'Unmanaged command already exists: {MANAGER}')
+    if Path(__file__).resolve() != CLI.resolve():
+        write(CLI, Path(__file__).read_text(encoding='utf-8'), 0o755)
+    write(MANAGER, MANAGER_SCRIPT, 0o755)
+
+
+def remove_manager():
+    if MANAGER.exists() and MANAGER.read_text() == MANAGER_SCRIPT:
+        MANAGER.unlink()
+    if CLI.exists():
+        if 'Copyright (c) 2026 sinascorpion' not in CLI.read_text()[:200]:
+            raise RuntimeError(f'Refusing to remove an unmanaged command: {CLI}')
+        CLI.unlink()
+
+
+def owned_certificates(s):
+    return list(dict.fromkeys(s.get('cert_names', []) + [s['cert_name']]))
 
 
 def installed_packages():
@@ -318,8 +347,8 @@ map $http_upgrade $mtproxy_web_upgrade {{
 server {{
     listen {s.get('origin_port', 443)} ssl http2;
     server_name {domain};
-    ssl_certificate /etc/letsencrypt/live/{s['cert_name']}/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/{s['cert_name']}/privkey.pem;
+    ssl_certificate {CERT_ROOT}/live/{s['cert_name']}/fullchain.pem;
+    ssl_certificate_key {CERT_ROOT}/live/{s['cert_name']}/privkey.pem;
     ssl_protocols TLSv1.2 TLSv1.3;
     access_log off;
     # URI may contain a bridge capability. Never log failed request lines either.
@@ -471,8 +500,11 @@ def install(args):
     check_os()
     previous = load()
     s = settings(args, previous)
-    if previous and s['domain'] != previous.get('domain'):
-        raise ValueError('Changing domain requires uninstall first; the current certificate is retained until then.')
+    domain_changed = bool(previous and s['domain'] != previous.get('domain'))
+    target_cert = 'mtproxy-web-' + s['domain']
+    known_certs = owned_certificates(previous) if previous else []
+    if domain_changed and target_cert not in known_certs and (CERT_ROOT / 'renewal' / (target_cert + '.conf')).exists():
+        raise RuntimeError('The new domain has an unmanaged certificate with this name; refusing to replace it.')
     addresses = {item[4][0] for item in socket.getaddrinfo(s['domain'], 443, type=socket.SOCK_STREAM)}
     if not addresses:
         raise ValueError('Domain has no DNS address')
@@ -489,24 +521,29 @@ def install(args):
                 port_available(port)
             except OSError as e:
                 raise RuntimeError(f'Port {port} is occupied. Use a clean/dedicated server.') from e
-        for path in (SITE, ENABLED, CONFIG, UNIT, CLI, BIN):
+        has_manager = owned_manager()
+        for path in (SITE, ENABLED, CONFIG, UNIT, CLI, MANAGER, BIN):
+            if has_manager and path in (CLI, MANAGER):
+                continue
             if path.exists() or path.is_symlink():
                 raise RuntimeError(f'Unmanaged path already exists: {path}')
         cert_name = 'mtproxy-web-' + s['domain']
-        if Path('/etc/letsencrypt/renewal/' + cert_name + '.conf').exists():
+        if (CERT_ROOT / 'renewal' / (cert_name + '.conf')).exists():
             raise RuntimeError('An unmanaged certificate with this name already exists.')
-        s.update(baseline=installed_packages(), created_user=False, cert_name=cert_name, complete=False)
+        s.update(baseline=installed_packages(), created_user=False, cert_name=cert_name,
+                 cert_names=[cert_name], complete=False, enabled=True)
         save(s)
     else:
         s = {**previous, **s}
+        s['cert_name'] = target_cert
+        s['cert_names'] = list(dict.fromkeys(known_certs + [target_cert]))
         if not previous.get('complete'):
             save(s)
     if previous and s['origin_port'] != previous.get('origin_port', 443):
         port_available(s['origin_port'])
     print(f'Installing for {s["domain"]}; public HTTPS:443; origin HTTPS:{s["origin_port"]}; sponsor: {bool(s["ad_tag"])}', flush=True)
     # Keep a root-only recovery CLI even if certificate issuance later fails.
-    if Path(__file__).resolve() != CLI.resolve():
-        write(CLI, Path(__file__).read_text(encoding='utf-8'), 0o755)
+    install_manager()
     packages_before = set(installed_packages())
     try:
         run(['apt-get', 'update'])
@@ -519,7 +556,7 @@ def install(args):
             save(previous)
         else:
             save(s)
-    if not previous.get('complete') or not BIN.exists():
+    if args.action == 'reinstall' or not previous.get('complete') or not BIN.exists():
         install_binary()
     if run(['id', '-u', USER], capture=True, check=False).returncode:
         run(['useradd', '--system', '--home-dir', str(DATA), '--no-create-home', '--shell', '/usr/sbin/nologin', USER])
@@ -539,7 +576,20 @@ def install(args):
     ETC.chmod(0o750)
     old_config = CONFIG.read_text() if CONFIG.exists() else None
     old_site = SITE.read_text() if SITE.exists() else None
+    certificate = CERT_ROOT / 'live' / s['cert_name'] / 'fullchain.pem'
+    certificate_existed = certificate.exists()
+    should_enable = args.action in ('install', 'reinstall') or previous.get('enabled', True)
     try:
+        if not certificate_existed:
+            # Keep the old TLS vhost/core alive while validating the new hostname.
+            challenge_site = nginx_config(s)
+            if domain_changed and old_site:
+                challenge_site = old_site + '\n' + challenge_site
+            set_site(challenge_site)
+            command = ['certbot', 'certonly', '--non-interactive', '--agree-tos', '--webroot',
+                       '-w', str(DATA / 'acme'), '--cert-name', s['cert_name'], '-d', s['domain']]
+            command += ['--email', s['email']] if s['email'] else ['--register-unsafely-without-email']
+            run(command)
         write(CONFIG, telemt_config(s), 0o640)
         run(['chown', f'root:{USER}', str(CONFIG)])
         write(UNIT, SERVICE)
@@ -548,17 +598,13 @@ def install(args):
         if previous:
             run(['systemctl', 'restart', 'mtproxy-web'])
         wait_backend()
-        certificate = Path('/etc/letsencrypt/live') / s['cert_name'] / 'fullchain.pem'
-        if not certificate.exists():
-            set_site(nginx_config(s))
-            command = ['certbot', 'certonly', '--non-interactive', '--agree-tos', '--webroot',
-                       '-w', str(DATA / 'acme'), '--cert-name', s['cert_name'], '-d', s['domain']]
-            command += ['--email', s['email']] if s['email'] else ['--register-unsafely-without-email']
-            run(command)
-        set_site(nginx_config(s, tls=True, ranges=ranges))
+        set_site(nginx_config(s, tls=should_enable, ranges=ranges))
+        if not should_enable:
+            run(['systemctl', 'disable', '--now', 'mtproxy-web'])
         write(HOOK, '#!/bin/sh\nnginx -t && systemctl reload nginx\n', 0o755)
         run(['systemctl', 'enable', '--now', 'nginx', 'certbot.timer'])
         s['complete'] = True
+        s['enabled'] = should_enable
         s['cloudflare_ranges'] = ranges
         save(s)
     except BaseException:
@@ -566,11 +612,22 @@ def install(args):
             write(CONFIG, old_config, 0o640)
             run(['chown', f'root:{USER}', str(CONFIG)])
             set_site(old_site)
-            run(['systemctl', 'restart', 'mtproxy-web'], check=False)
+            run(['systemctl', 'enable', '--now', 'mtproxy-web'] if previous.get('enabled', True)
+                else ['systemctl', 'disable', '--now', 'mtproxy-web'], check=False)
+            if previous.get('enabled', True):
+                run(['systemctl', 'restart', 'mtproxy-web'], check=False)
             save(previous)
+            if domain_changed and not certificate_existed:
+                delete_certificate(s['cert_name'], check=False)
         raise
+    if domain_changed:
+        for old_cert in known_certs:
+            if old_cert != s['cert_name'] and delete_certificate(old_cert, check=False):
+                s['cert_names'].remove(old_cert)
+        save(s)
     print('\nsinascorpion — Installed / نصب شد\n' + link(s))
     print('Management: mtproxy-web configure | status | link | uninstall')
+    print('Open the management menu any time: sinascorpion-webproxy (or sudo sinascorpion-webproxy)')
     if s['cdn']:
         print('CDN: use verified origin TLS, bypass cache, preserve headers/methods, support WebSockets and long polls; no JS challenges.')
         if s['cdn_provider'] == 'other' and not ranges:
@@ -588,17 +645,63 @@ def status():
     print(f'Domain: {s["domain"]}\nTelemt: {TELEMT_VERSION}\nSponsor configured: {bool(s["ad_tag"])}')
     print(f'CDN: {s.get("cdn_provider", "none")}\nPublic port: 443\nOrigin port: {s.get("origin_port", 443)}')
     run(['systemctl', '--no-pager', '--full', 'status', 'mtproxy-web'], check=False)
+    if not s.get('enabled', True):
+        print('Proxy disabled; settings and certificate retained. / پروکسی غیرفعال است')
+        return
     with urllib.request.urlopen(f'http://127.0.0.1:{API_PORT}/v1/runtime/web/status', timeout=5) as r:
         print(json.dumps(json.load(r), indent=2))
+
+
+def delete_certificate(name, check=True):
+    if not (CERT_ROOT / 'renewal' / (name + '.conf')).exists():
+        return True
+    if not shutil.which('certbot'):
+        if check:
+            raise RuntimeError('Certbot is missing; reinstall it before removing the managed certificate.')
+        print(f'Certificate retained for later cleanup: {name}')
+        return False
+    result = run(['certbot', 'delete', '--non-interactive', '--cert-name', name], check=check)
+    if result.returncode:
+        print(f'Certificate retained for later cleanup: {name}')
+    return result.returncode == 0
+
+
+def set_enabled(enabled):
+    s = load()
+    if not s or not s.get('complete'):
+        raise RuntimeError('Complete installation first')
+    old_site = SITE.read_text()
+    was_enabled = s.get('enabled', True)
+    try:
+        if enabled:
+            run(['systemctl', 'enable', '--now', 'mtproxy-web'])
+            wait_backend()
+            set_site(nginx_config(s, tls=True, ranges=s.get('cloudflare_ranges', [])))
+        else:
+            # Retain only HTTP-01 so certificates can renew while the proxy is off.
+            set_site(nginx_config(s, tls=False))
+            run(['systemctl', 'disable', '--now', 'mtproxy-web'])
+        s['enabled'] = enabled
+        save(s)
+    except BaseException:
+        set_site(old_site)
+        run(['systemctl', 'enable', '--now', 'mtproxy-web'] if was_enabled
+            else ['systemctl', 'disable', '--now', 'mtproxy-web'], check=False)
+        raise
+    print('Enabled / فعال شد' if enabled else 'Disabled / غیرفعال شد؛ تنظیمات و گواهی حفظ شدند')
 
 
 def uninstall(args):
     s = load()
     if not s:
+        if getattr(args, 'remove_manager', False):
+            if args.yes or input('Remove the management command too? [y/N]: ').lower() == 'y':
+                remove_manager()
+                return True
         print('Nothing installed / نصب فعالی پیدا نشد')
-        return
+        return False
     if not args.yes and input('Delete this proxy, secret and certificate? / حذف کامل؟ [y/N]: ').strip().lower() != 'y':
-        return
+        return False
     print('Removing only mtproxy-web-owned resources…', flush=True)
     # Decide package removal before deleting recovery state. Never remove a baseline package.
     added = sorted((set(installed_packages()) - set(s['baseline'])) & set(s.get('added_packages', [])))
@@ -616,8 +719,8 @@ def uninstall(args):
         run(['nginx', '-t'])
         if run(['systemctl', 'is-active', '--quiet', 'nginx'], check=False).returncode == 0:
             run(['systemctl', 'reload', 'nginx'])
-    if shutil.which('certbot') and Path('/etc/letsencrypt/renewal', s['cert_name'] + '.conf').exists():
-        run(['certbot', 'delete', '--non-interactive', '--cert-name', s['cert_name']])
+    for name in owned_certificates(s):
+        delete_certificate(name)
     UNIT.unlink(missing_ok=True)
     run(['systemctl', 'daemon-reload'])
     run(['systemctl', 'reset-failed'], check=False)
@@ -629,15 +732,102 @@ def uninstall(args):
     if args.purge_dependencies and added:
         run(['apt-get', 'purge', '-y', *added])
     shutil.rmtree(ETC)
-    CLI.unlink(missing_ok=True)
+    if getattr(args, 'remove_manager', False):
+        remove_manager()
     print('Removed. SSH, firewall and existing packages were preserved. / حذف شد')
+    if not getattr(args, 'remove_manager', False):
+        print('Management menu retained: sinascorpion-webproxy')
+    return True
+
+
+def configured_args(action='configure'):
+    return parser().parse_args([action, '--non-interactive'])
+
+
+def change_domain():
+    s = load()
+    if not s:
+        raise RuntimeError('Install first')
+    domain = normalize_domain(prompt('New domain / دامنه جدید', s['domain']))
+    if domain == s['domain']:
+        print('Domain unchanged / دامنه تغییر نکرد')
+        return
+    args = configured_args()
+    args.domain = domain
+    install(args)
+
+
+def change_secret():
+    s = load()
+    if not s:
+        raise RuntimeError('Install first')
+    args = configured_args()
+    args.secret = choose_secret(args, s, True)
+    if args.secret == s['secret']:
+        print('Secret unchanged / سکرت تغییر نکرد')
+        return
+    print('Changing the secret invalidates existing users’ links. / لینک‌های قبلی دیگر متصل نمی‌شوند.')
+    if input('Apply new secret? / اعمال سکرت جدید؟ [y/N]: ').strip().lower() == 'y':
+        install(args)
+
+
+def menu():
+    while True:
+        s = load()
+        state = 'not installed' if not s else 'enabled' if s.get('enabled', True) else 'disabled'
+        print(f'\nTelegram Web Proxy Wizard — {state}')
+        print('1) Install / reinstall — نصب یا نصب مجدد')
+        print('2) Configure — ویزارد تنظیمات')
+        print('3) Change domain — تغییر دامنه')
+        print('4) Change secret — تغییر سکرت')
+        print('5) Disable — غیرفعال‌سازی پروکسی')
+        print('6) Enable — فعال‌سازی دوباره')
+        print('7) Status — وضعیت')
+        print('8) Show link — نمایش لینک')
+        print('9) Uninstall — حذف پروکسی')
+        print('0) Exit — خروج')
+        choice = input('Select / انتخاب: ').strip()
+        if choice == '0':
+            return
+        try:
+            if choice == '1':
+                install(parser().parse_args(['reinstall' if s else 'install']))
+            elif choice == '2':
+                if not s:
+                    raise RuntimeError('Install first')
+                install(parser().parse_args(['configure']))
+            elif choice == '3':
+                change_domain()
+            elif choice == '4':
+                change_secret()
+            elif choice == '5':
+                set_enabled(False)
+            elif choice == '6':
+                set_enabled(True)
+            elif choice == '7':
+                status()
+            elif choice == '8':
+                if not s:
+                    raise RuntimeError('Install first')
+                print(link(s))
+            elif choice == '9':
+                purge = prompt('Remove installer-added packages? / حذف بسته‌های اضافه‌شده؟ y/n', 'y').lower() == 'y'
+                remove = prompt('Remove management command too? / حذف فرمان مدیریت هم؟ y/n', 'n').lower() == 'y'
+                if uninstall(argparse.Namespace(yes=False, purge_dependencies=purge, remove_manager=remove)) and remove:
+                    return
+            else:
+                print('Invalid choice / گزینه نامعتبر')
+        except (ValueError, RuntimeError, OSError, subprocess.CalledProcessError) as e:
+            print(f'ERROR: {e}')
 
 
 def parser():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--version', action='version', version=VERSION)
-    sub = p.add_subparsers(dest='action', required=True)
-    for action in ('install', 'configure'):
+    sub = p.add_subparsers(dest='action')
+    p.set_defaults(action='menu')
+    sub.add_parser('menu')
+    for action in ('install', 'configure', 'reinstall'):
         s = sub.add_parser(action)
         s.add_argument('--non-interactive', action='store_true')
         s.add_argument('--domain')
@@ -652,16 +842,21 @@ def parser():
         s.add_argument('--client-ip-header', help='Client-IP header set/overwritten by the trusted CDN; optional with other providers')
     sub.add_parser('status')
     sub.add_parser('link')
+    sub.add_parser('enable')
+    sub.add_parser('disable')
+    sub.add_parser('change-domain')
+    sub.add_parser('change-secret')
     u = sub.add_parser('uninstall')
     u.add_argument('--yes', action='store_true')
     u.add_argument('--purge-dependencies', action='store_true', help='Also purge packages added by this installer; keep all baseline packages')
+    u.add_argument('--remove-manager', action='store_true', help='Also remove both management commands')
     return p
 
 
 def main():
     args = parser().parse_args()
     if os.geteuid() != 0:
-        raise SystemExit('Run as root / با کاربر root اجرا کن')
+        raise SystemExit('Run: sudo sinascorpion-webproxy / با دسترسی root اجرا کن')
     import fcntl
     with open('/run/lock/mtproxy-web.lock', 'w') as lock:
         try:
@@ -669,12 +864,20 @@ def main():
         except BlockingIOError:
             raise SystemExit('Another mtproxy-web operation is running')
         try:
-            if args.action in ('install', 'configure'):
+            if args.action == 'menu':
+                menu()
+            elif args.action in ('install', 'configure', 'reinstall'):
                 if args.action == 'configure' and not STATE.exists():
                     raise RuntimeError('Install first')
                 install(args)
             elif args.action == 'status':
                 status()
+            elif args.action in ('enable', 'disable'):
+                set_enabled(args.action == 'enable')
+            elif args.action == 'change-domain':
+                change_domain()
+            elif args.action == 'change-secret':
+                change_secret()
             elif args.action == 'link':
                 state = load()
                 if not state:
@@ -682,6 +885,9 @@ def main():
                 print(link(state))
             else:
                 uninstall(args)
+        except (EOFError, KeyboardInterrupt):
+            print('\nClosed / خروج')
+            return 0
         except (ValueError, RuntimeError, OSError, subprocess.CalledProcessError) as e:
             print(f'ERROR: {e}\nIf partially installed, fix DNS/ports then rerun, or run mtproxy-web uninstall --purge-dependencies.', file=sys.stderr)
             return 1

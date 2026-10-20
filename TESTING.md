@@ -15,6 +15,11 @@ Platform: Ubuntu 24.04 amd64. Core: pinned 3.5.14 release with verified SHA-256.
 - Generic CDN selection never implicitly trusts Cloudflare headers.
 - Custom client-IP trust requires both explicit CIDRs and a valid header; /0 is refused.
 - Dependency uninstall refuses removal of pre-existing OS packages.
+- Domain migration keeps the serving configuration during issuance, commits the
+  new certificate before retiring the old one, and rolls back certificate/backend
+  failures. Disabled state survives reconfiguration; reinstall preserves the secret.
+- Disable/enable, failed activation, menu action routing and retaining/removing
+  the management command are covered by isolated Linux lifecycle tests.
 - Unix permission checks cover the executable under restrictive bootstrap umask.
 
 ## Live checks
@@ -41,6 +46,22 @@ the origin TLS listener, not such an account-level routing rule. Other origin po
 are covered by configuration/validation tests, not separate live deployments.
 
 ## Reproduce
+
+### Management acceptance — 2026-10-21
+
+- All 21 automated tests pass on Ubuntu 24.04.
+- A fresh install exposes `sinascorpion-webproxy`. Its real SSH-terminal menu
+  successfully disables, enables, shows status, changes the secret and uninstalls.
+- Disabling removes the public HTTPS listener and stops the core while retaining
+  settings and the HTTP certificate-renewal route. Enabling restores service.
+- After changing the secret, all four carriers pass external real-Telegram probes
+  through the CDN. Reinstall preserves the complete core configuration hash.
+- NGINX validates the active TLS site alongside a second domain's staged HTTP-01
+  route. Full second-domain issuance is covered by lifecycle simulations, not a
+  second live DNS hostname.
+- Full removal, including installer-added packages and the management command,
+  restores the exact 690-package baseline with no managed paths or failed units.
+  Test artifacts are removed afterward; firewall rules remain empty.
 
 ```bash
 python3 -m unittest discover -s tests -v

@@ -21,7 +21,7 @@ Ubuntu 22.04 and arm64 are supported code paths; live testing uses Ubuntu 24.04 
 curl -fsSLo /tmp/telegram-web-proxy-install.sh https://raw.githubusercontent.com/sinascorpion/telegram-web-proxy/main/install.sh && sudo bash /tmp/telegram-web-proxy-install.sh
 ```
 
-The wizard asks for:
+The bootstrap opens the management menu. Select **1** to install. The setup wizard asks for:
 
 1. Domain/subdomain.
 2. Optional certificate contact email.
@@ -139,20 +139,65 @@ ports are reserved. HTTP port 80 remains required for HTTP-01 renewal.
 
 ## Manage
 
+After installation, open the complete management menu with one command:
+
 ```bash
-sudo mtproxy-web configure
-sudo mtproxy-web link
-sudo mtproxy-web status
-sudo certbot renew --dry-run --no-random-sleep-on-renew
-sudo mtproxy-web uninstall --purge-dependencies
+sinascorpion-webproxy
+# If you are not root:
+sudo sinascorpion-webproxy
 ```
 
+The installer displays this command after the first installation. The menu offers
+install/reinstall, the settings wizard, change domain, change secret, disable,
+enable, status, link display and uninstall. Existing installations can get the
+new menu by re-running the one-command bootstrap and selecting install/reinstall.
+
+Reinstall downloads the checksum-pinned core again while retaining the domain,
+secret and other saved settings. Domain changes obtain the new certificate before
+switching the public site; a failed activation restores previous settings. Set up
+the new domain's DNS/CDN first. A different hostname or secret changes users' links.
+
+Disable stops the core, disables its automatic startup and removes the public
+HTTPS proxy listener while retaining settings and certificates. Only the HTTP-01
+webroot remains for certificate renewal. Enable restores the proxy. Changing
+settings while disabled does not silently enable it; install/reinstall does.
+
+Uninstall is available in the menu and asks whether to purge installer-added
+packages and whether to remove the management command too. By default the small
+management command remains so you can install again. Removing the manager as
+well closes the menu; use the bootstrap again for a future installation.
+
+Equivalent non-menu commands:
+
+```bash
+sudo sinascorpion-webproxy configure
+sudo sinascorpion-webproxy reinstall --non-interactive
+sudo sinascorpion-webproxy change-domain
+sudo sinascorpion-webproxy change-secret
+sudo sinascorpion-webproxy disable
+sudo sinascorpion-webproxy enable
+sudo sinascorpion-webproxy link
+sudo sinascorpion-webproxy status
+sudo certbot renew --dry-run --no-random-sleep-on-renew
+sudo sinascorpion-webproxy uninstall --purge-dependencies --remove-manager
+```
+
+The older `mtproxy-web` command remains an alias for compatibility.
 The wizard preserves the current secret and certificate. Enter `-` to remove
-a sponsor tag. A domain change requires uninstall first. `--yes` skips the
+a sponsor tag. `--yes` skips the
 uninstall prompt. Uninstall removes this proxy's certificate, settings, secret,
 service and data. Dependency purge removes only packages added by the installer,
 and refuses a removal that would also remove a pre-existing OS package. SSH and
 firewall settings are preserved. Package logs/account metadata may remain.
+
+## Multiple secrets and blocking
+
+Separate secrets can isolate access: if one user's credential leaks, it can be
+revoked or rotated without rotating everyone's credential in a multi-user setup.
+They do not provide different public IPs, domains or CDN routes. A block of the
+shared public endpoint affects all secrets using that endpoint. More secrets alone
+are therefore not protection against IP/domain blocking. This installer currently
+manages one shared WEB secret; replacing it invalidates existing links.
 
 An interrupted installation retains recovery state where possible: fix the cause
 and rerun, or uninstall. A failed managed reconfiguration restores previous active

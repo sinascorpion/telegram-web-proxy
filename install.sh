@@ -35,7 +35,7 @@ if [[ $# -eq 0 ]]; then
         echo 'Wizard requires a terminal. For automation use: install --non-interactive --domain DOMAIN --public-ip IP' >&2
         exit 1
     fi
-    python3 "$task_dir/mtproxy_web.py" install </dev/tty
+    python3 "$task_dir/mtproxy_web.py" menu </dev/tty
 else
     python3 "$task_dir/mtproxy_web.py" "$@"
 fi
