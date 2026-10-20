@@ -43,16 +43,21 @@ Platform: Ubuntu 24.04 amd64. Core: pinned 3.5.14 release with verified SHA-256.
 
 ### Default website — 2026-10-21
 
-- All 42 automated tests pass on Ubuntu 24.04, including upgrading the previous
+- All 45 automated tests pass on Ubuntu 24.04, including upgrading the previous
   default page while preserving a custom website.
-- The public template uses the neutral name Everyday Notes. Its HTML contains no
-  maintainer name or proxy branding. Migration removes the previous owned stylesheet.
+- Each domain gets stable variations in neutral name, colors, headings, selected
+  articles and layout. Secrets and profile order do not affect its site. Multiple
+  secrets on one hostname share one site. Custom shared/per-domain pages are preserved.
+- Public HTML contains no maintainer name, proxy branding or template-owner marker.
+- An isolated NGINX/core run served three distinct domain pages and their CSS while
+  four profiles concurrently completed all four real-Telegram carrier probes.
 - The default journal serves its stylesheet from the same hostname, compatible
   with the core's static-page Content-Security-Policy. It has no external assets
   or JavaScript. Desktop and 375px mobile layouts and article expansion were
   checked in a browser through the public domain.
-- The page was activated with an in-process reload. Proxy state, core configuration,
-  NGINX configuration and the running core PID remained unchanged.
+- Domain-specific sites were activated with an in-process reload. Only decoy
+  directory paths changed in the core configuration; proxy state, NGINX configuration
+  and the running core PID remained unchanged.
 
 Date: 2026-10-20. Ubuntu 24.04 amd64, approximately 1.5 GB RAM.
 

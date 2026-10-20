@@ -4,7 +4,7 @@
 
 Easy Telegram WEB proxy setup with automatic SSL, multiple domains and secrets,
 CDN support, optional sponsor tags and a management menu.
-Every domain also serves a lightweight default website for ordinary browser visits.
+Each domain serves a lightweight website with its own stable name, colors and articles.
 
 ## Install
 

@@ -3,12 +3,14 @@
 """sinascorpion Telegram WEB proxy installer. Python standard library only."""
 import argparse
 import hashlib
+import html
 import ipaddress
 import json
 import os
 from pathlib import Path
 import platform
 import re
+import random
 import secrets
 import shutil
 import socket
@@ -145,6 +147,120 @@ def install_default_site():
         old_stylesheet = DATA / 'public/journal.css'
         if old_stylesheet.is_file() and old_stylesheet.read_text(encoding='utf-8') == DEFAULT_STYLE:
             old_stylesheet.unlink()
+
+
+def domain_site(domain):
+    """Stable public presentation derived only from the hostname, never credentials."""
+    domain = normalize_domain(domain)
+    rng = random.Random(int.from_bytes(hashlib.sha256(domain.encode('ascii')).digest(), 'big'))
+    name = rng.choice(('Cedar', 'Willow', 'Amber', 'Quiet', 'Clear', 'Open', 'Morning', 'Maple'))
+    name += ' ' + rng.choice(('Pages', 'Notes', 'Corner', 'Compass', 'Field', 'Window', 'Path', 'Letters'))
+    palette = rng.choice((
+        ('#f5f4ef','#183332','#28615c','#d8b477'),
+        ('#f5f3ef','#392e3f','#69456d','#ccb191'),
+        ('#f1f4f8','#20334c','#365b89','#c6ab78'),
+        ('#f7f3ee','#45352e','#825237','#c5b57e'),
+        ('#f2f5f1','#263c2b','#3c6747','#c7b179'),
+        ('#f8f3f2','#442e35','#824856','#c7b392'),
+    ))
+    headline = rng.choice(('Small ideas for a more thoughtful day.',
+                          'Make a little room for useful ideas.',
+                          'Good things, simply explained.',
+                          'A fresh perspective on everyday things.',
+                          'Thoughtful notes for curious minds.',
+                          'Less noise. A little more discovery.'))
+    introduction = rng.choice(('Practical reading about everyday tools, creative habits, and the world around us.',
+                               'A quiet place for useful discoveries and small ideas worth keeping.',
+                               'Short guides and considered observations to explore at your own pace.',
+                               'Simple observations about learning, making, and living with technology.'))
+    entries = (
+        ('Everyday tools', 'Give your browser a fresh start.',
+         'A few small habits can make the web feel less cluttered.',
+         'Keep the tabs you are using and save the rest to a reading list. Review browser extensions occasionally and remove the ones you no longer need.',
+         'At the end of a session, bookmark anything worth returning to. Starting with a clear window can make the next task easier to find.'),
+        ('Practical essentials', 'A backup routine that fits your week.',
+         'A useful routine starts with the files that matter most.',
+         'Choose a small set of important folders and keep an additional copy on a separate device or a storage service you trust.',
+         'Set a reminder to check the copy and restore a sample file. A simple routine you can repeat is more useful than an elaborate plan you forget.'),
+        ('The web', 'The pleasure of a lightweight page.',
+         'Readable text and straightforward navigation go a long way.',
+         'Start with the words and the structure. Clear headings and comfortable spacing help readers find their way without extra distractions.',
+         'Smaller assets and system fonts can reduce loading time. Add a feature when it helps someone find, read, or understand something.'),
+        ('Learning', 'Keep a notebook for small discoveries.',
+         'You do not need a perfect system to keep a useful record.',
+         'Write down an idea in a few sentences while it is still fresh. Add a title you will recognize later and one concrete example.',
+         'Return to your notes once in a while. Connecting two small observations can be more interesting than collecting another long list of links.'),
+        ('Creative habits', 'Leave a little space between tasks.',
+         'A short pause can be a useful part of getting things done.',
+         'Finish one small piece of work before opening the next. Write down where to resume, then step away from the screen for a moment.',
+         'A change of pace does not need to be complicated. Make a drink, look outside, or clear your desk before you begin again.'),
+        ('Photography', 'Notice the light before the subject.',
+         'An ordinary scene can look different at another hour.',
+         'Look for soft light near a window or an area of open shade. Notice where the highlights and shadows fall before choosing your frame.',
+         'Try a second angle and keep the background simple. Practicing with familiar subjects is a good way to discover what catches your eye.'),
+        ('Home workspace', 'Make a small desk work a little better.',
+         'A comfortable corner starts with a few useful choices.',
+         'Keep frequently used items within reach and put occasional tools away. Give cables a clear path and leave some open space in front of you.',
+         'Work with the light you have and adjust the arrangement as your needs change. A workspace can be simple without being empty.'),
+        ('Reading', 'Choose one thing to read slowly.',
+         'Not every interesting page needs to become another open tab.',
+         'Set aside one article or chapter you want to spend time with. Read it without switching between a dozen other things.',
+         'Keep a sentence or an observation that stays with you. A small amount of reading can be rewarding when you give it your attention.'),
+    )
+    cards = []
+    for category, title, lead, first, second in rng.sample(entries, 3):
+        cards.append('<article><p class="category">' + html.escape(category) + '</p><h3>' + html.escape(title)
+                     + '</h3><p>' + html.escape(lead) + '</p><details><summary>Read the note</summary><p>'
+                     + html.escape(first) + '</p><p>' + html.escape(second) + '</p></details></article>')
+    page = DEFAULT_SITE.replace('Everyday Notes', name).replace(' data-site="everyday-notes"', '')
+    page = page.replace('A little clarity for your digital life.', html.escape(headline))
+    page = page.replace('Useful ideas about technology, the everyday web, and making more room for what matters.', html.escape(introduction))
+    page = re.sub(r'<div class="posts">.*?</div></section>',
+                  '<div class="posts">' + '\n'.join(cards) + '</div></section>', page, flags=re.S)
+    section_title = rng.choice(('Latest notes', 'A few things worth reading', 'On the reading table', 'Ideas to take with you'))
+    page = page.replace('From the notebook', section_title)
+    page = page.replace('Thoughtfully simple.', rng.choice(('Read at your own pace.', 'Small ideas, thoughtfully collected.', 'A little curiosity goes a long way.')))
+    paper, ink, accent, gold = palette
+    style = DEFAULT_STYLE + f'\n:root{{--paper:{paper};--ink:{ink};--accent:{accent};--gold:{gold}}}\n'
+    style += rng.choice(('.hero{grid-template-columns:1.3fr 1fr}',
+                         '.hero{grid-template-columns:1fr 1.1fr}.art{border-radius:40px 3px 40px 3px}',
+                         '.art{border-radius:50% 50% 3px 3px}'))
+    style += '\n@media(max-width:760px){.hero{grid-template-columns:1fr}}\n'
+    return page, style
+
+
+def site_directory(domain):
+    """Keep a pre-existing custom shared site; defaults get one directory per host."""
+    root = DATA / 'public'
+    if (root / 'index.html').exists():
+        content = (root / 'index.html').read_text(encoding='utf-8')
+        if not any(marker in content for marker in ('data-site="everyday-notes"', 'data-site="sinascorpion-journal"',
+                                                    '<p>This website is online.</p>')):
+            return root
+    return DATA / 'sites' / normalize_domain(domain)
+
+
+def install_domain_sites(s):
+    install_default_site()
+    manifest_path = ETC / 'sites.json'
+    manifest = json.loads(manifest_path.read_text()) if manifest_path.exists() else {}
+    for domain in dict.fromkeys(p['domain'] for p in profile_list(s)):
+        directory = site_directory(domain)
+        if directory == DATA / 'public':
+            continue
+        directory.parent.mkdir(parents=True, exist_ok=True)
+        directory.parent.chmod(0o755)
+        directory.mkdir(exist_ok=True)
+        directory.chmod(0o755)
+        page, style = domain_site(domain)
+        paths = (directory / 'index.html', directory / 'site.css')
+        existing = [hashlib.sha256(p.read_bytes()).hexdigest() if p.exists() else None for p in paths]
+        if any(p.exists() for p in paths) and manifest.get(domain) != existing:
+            continue  # Preserve a site the administrator customized.
+        write(paths[0], page)
+        write(paths[1], style)
+        manifest[domain] = [hashlib.sha256(p.read_bytes()).hexdigest() for p in paths]
+    write(manifest_path, json.dumps(manifest, indent=2) + '\n', 0o600)
 
 
 def save(state):
@@ -485,7 +601,7 @@ public_addr = "{s['public_ip']}:443"
 
 [web.vhosts.decoy]
 mode = "static_directory"
-directory = "/var/lib/mtproxy-web/public"
+directory = "{site_directory(s['domain']).as_posix()}"
 index = "index.html"
 
 [[web.vhosts.profiles]]
@@ -779,7 +895,7 @@ def install(args):
     # NGINX must traverse the HTTP-01 webroot even under the bootstrap's umask.
     for directory in (DATA, DATA / 'public', DATA / 'acme'):
         directory.chmod(0o755)
-    install_default_site()
+    install_domain_sites(s)
     run(['chown', '-R', f'{USER}:{USER}', str(DATA)])
     run(['chown', f'root:{USER}', str(ETC)])
     ETC.chmod(0o750)

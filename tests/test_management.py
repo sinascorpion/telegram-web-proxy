@@ -345,6 +345,48 @@ class ManagementTests(unittest.TestCase):
         self.assertFalse(old.exists())
         self.assertEqual((m.DATA/'public/site.css').read_text(),m.DEFAULT_STYLE)
 
+    def test_domain_sites_are_stable_and_distinct_without_credential_or_owner_text(self):
+        one = m.domain_site('one.example.com')
+        two = m.domain_site('two.example.com')
+        self.assertEqual(one,m.domain_site('ONE.EXAMPLE.COM.'))
+        self.assertNotEqual(one[0],two[0])
+        for page,style in (one,two):
+            self.assertIn('Welcome',page)
+            self.assertIn('href="/site.css"',page)
+            self.assertNotIn('data-site=',page)
+            self.assertNotIn('sinascorpion',page.lower())
+            self.assertNotIn('proxy',page.lower())
+            self.assertNotIn('<script',page)
+            self.assertIn('@media(max-width:760px)',style)
+
+    def test_domains_get_separate_snapshots_and_shared_domain_reuses_one_site(self):
+        items = [self.old,{**self.old,'domain':'two.example.com'}, {**self.old,'secret':'34'*16}]
+        state = {'profiles':items}
+        m.install_domain_sites(state)
+        one,two = m.site_directory(self.old['domain']),m.site_directory('two.example.com')
+        self.assertNotEqual(one,two)
+        self.assertNotEqual((one/'index.html').read_text(),(two/'index.html').read_text())
+        before = (one/'index.html').read_bytes()
+        m.install_domain_sites({'profiles':list(reversed(items))})
+        self.assertEqual(before,(one/'index.html').read_bytes())
+        config = m.telemt_config(state)
+        self.assertEqual(config.count('[[web.vhosts]]'),2)
+        self.assertIn(f'directory = "{one}"',config)
+        self.assertIn(f'directory = "{two}"',config)
+
+    def test_custom_shared_and_per_domain_sites_are_preserved(self):
+        state = {'profiles':[self.old]}
+        m.install_domain_sites(state)
+        directory = m.site_directory(self.old['domain'])
+        custom = '<!doctype html><html>My customized site</html>'
+        m.write(directory/'index.html',custom)
+        m.install_domain_sites(state)
+        self.assertEqual((directory/'index.html').read_text(),custom)
+        m.write(m.DATA/'public/index.html',custom)
+        m.install_domain_sites(state)
+        self.assertEqual(m.site_directory(self.old['domain']),m.DATA/'public')
+        self.assertIn(f'directory = "{m.DATA}/public"',m.telemt_config(self.old))
+
     def test_failed_addition_restores_all_existing_profiles(self):
         args = m.configured_args()
         args._profiles = [self.old,{**self.old,'secret':'34'*16}]
