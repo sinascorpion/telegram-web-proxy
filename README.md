@@ -1,6 +1,6 @@
 # Telegram Web Proxy Wizard
 
-[فارسی](README.fa.md) · Maintained by **sinascorpion**
+[فارسی](README.fa.md)
 
 Easy Telegram WEB proxy setup with automatic SSL, multiple domains and secrets,
 CDN support, optional sponsor tags and a management menu.
