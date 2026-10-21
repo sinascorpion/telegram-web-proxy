@@ -14,6 +14,7 @@ from unittest.mock import patch
 spec = importlib.util.spec_from_file_location('management', Path(__file__).parents[1] / 'mtproxy_web.py')
 m = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(m)
+REAL_SET_SITE = m.set_site
 
 
 @unittest.skipUnless(os.name == 'posix', 'Service/filesystem lifecycle tests run on Ubuntu')
@@ -55,6 +56,45 @@ class ManagementTests(unittest.TestCase):
         self.stack.enter_context(patch.object(m.socket, 'getaddrinfo', return_value=[(2,1,6,'',('8.8.8.8',443))]))
         self.stack.enter_context(patch.object(m.shutil, 'which', return_value='/mock/bin'))
         self.stack.enter_context(patch.object(m, 'certificate_usable', return_value=True))
+
+    def test_long_domain_hash_settings_are_idempotent(self):
+        m.ensure_nginx_hash_settings()
+        m.ensure_nginx_hash_settings()
+        self.assertEqual(m.nginx_hash_path().read_text(), m.NGINX_HASH_SETTINGS)
+
+    def test_existing_hash_directive_is_respected(self):
+        m.write(m.NGINX_ROOT/'nginx.conf', 'server_names_hash_bucket_size 512;')
+        m.ensure_nginx_hash_settings()
+        self.assertFalse(m.nginx_hash_path().exists())
+
+    def test_small_custom_hash_directive_is_preserved(self):
+        target = m.NGINX_ROOT/'nginx.conf'
+        m.write(target, 'server_names_hash_bucket_size 64;')
+        with self.assertRaises(RuntimeError):
+            m.ensure_nginx_hash_settings()
+        self.assertEqual(target.read_text(), 'server_names_hash_bucket_size 64;')
+        self.assertFalse(m.nginx_hash_path().exists())
+
+    def test_invalid_nginx_config_restores_previous_files(self):
+        def fail(command, **kwargs):
+            if command == ['nginx', '-t']:
+                raise subprocess.CalledProcessError(1, command)
+            return self.fake_run(command, **kwargs)
+        with patch.object(m, 'run', side_effect=fail):
+            with self.assertRaises(subprocess.CalledProcessError):
+                REAL_SET_SITE('invalid nginx config')
+        self.assertEqual(m.SITE.read_text(), 'OLD_NGINX_CONFIG')
+        self.assertFalse(m.ENABLED.is_symlink())
+        self.assertFalse(m.nginx_hash_path().exists())
+
+    def test_incomplete_status_does_not_report_enabled(self):
+        state = dict(self.old, complete=False)
+        m.save(state)
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            m.status()
+        self.assertIn('Installation incomplete', output.getvalue())
+        self.assertFalse(self.calls)
 
     def make_certificate(self, name):
         m.write(m.CERT_ROOT/'live'/name/'fullchain.pem', 'test certificate')

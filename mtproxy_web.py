@@ -49,6 +49,7 @@ USER = 'mtproxy-web'
 BACKEND_PORT = 18080
 API_PORT = 18082
 PACKAGES = ['nginx', 'certbot', 'ca-certificates', 'openssl']
+NGINX_HASH_SETTINGS = '# Managed by telegram-web-proxy\nserver_names_hash_bucket_size 512;\n'
 
 DEFAULT_SITE = '''<!doctype html>
 <html lang="en" data-site="everyday-notes">
@@ -781,15 +782,57 @@ WantedBy=multi-user.target
 '''
 
 
-def set_site(text):
-    write(SITE, text)
-    if not ENABLED.exists():
-        ENABLED.symlink_to(SITE)
-    run(['nginx', '-t'])
-    if run(['systemctl', 'is-active', '--quiet', 'nginx'], check=False).returncode:
-        run(['systemctl', 'start', 'nginx'])
+def nginx_hash_path():
+    return NGINX_ROOT / 'conf.d/mtproxy-web-hash.conf'
+
+
+def ensure_nginx_hash_settings():
+    owned = nginx_hash_path()
+    if owned.exists() and owned.read_text() != NGINX_HASH_SETTINGS:
+        raise RuntimeError(f'Unmanaged NGINX settings already exist: {owned}')
+    files = [NGINX_ROOT / 'nginx.conf']
+    files += list((NGINX_ROOT / 'conf.d').glob('*.conf'))
+    files += list((NGINX_ROOT / 'sites-enabled').glob('*'))
+    external = []
+    for path in files:
+        if path == owned or path.resolve() == SITE.resolve() or not path.is_file():
+            continue
+        external += re.findall(r'^\s*server_names_hash_bucket_size\s+(\d+)\s*;', path.read_text(), re.M)
+    if external:
+        if any(int(value) < 512 for value in external):
+            raise RuntimeError('Existing custom server_names_hash_bucket_size must be at least 512 for long domains.')
+        owned.unlink(missing_ok=True)
     else:
-        run(['systemctl', 'reload', 'nginx'])
+        write(owned, NGINX_HASH_SETTINGS)
+
+
+def set_site(text):
+    previous = SITE.read_text() if SITE.exists() else None
+    had_link = ENABLED.exists() or ENABLED.is_symlink()
+    hash_path = nginx_hash_path()
+    previous_hash = hash_path.read_text() if hash_path.exists() else None
+    try:
+        ensure_nginx_hash_settings()
+        write(SITE, text)
+        if not had_link:
+            ENABLED.symlink_to(SITE)
+        run(['nginx', '-t'])
+        if run(['systemctl', 'is-active', '--quiet', 'nginx'], check=False).returncode:
+            run(['systemctl', 'start', 'nginx'])
+        else:
+            run(['systemctl', 'reload', 'nginx'])
+    except BaseException:
+        if previous is None:
+            SITE.unlink(missing_ok=True)
+        else:
+            write(SITE, previous)
+        if not had_link:
+            ENABLED.unlink(missing_ok=True)
+        if previous_hash == NGINX_HASH_SETTINGS:
+            write(hash_path, previous_hash)
+        elif previous_hash is None and hash_path.exists() and hash_path.read_text() == NGINX_HASH_SETTINGS:
+            hash_path.unlink()
+        raise
 
 
 def wait_backend():
@@ -1024,6 +1067,9 @@ def status():
     s = load()
     if not s:
         raise RuntimeError('Not installed')
+    if not s.get('complete'):
+        print('Installation incomplete. Select Install / reinstall to resume.')
+        return
     print(f'Domain: {s["domain"]}\nTelemt: {TELEMT_VERSION}\nSponsor configured: {bool(s["ad_tag"])}')
     print(f'CDN: {s.get("cdn_provider", "none")}\nPublic port: 443\nOrigin port: {s.get("origin_port", 443)}')
     run(['systemctl', '--no-pager', '--full', 'status', 'mtproxy-web'], check=False)
@@ -1123,6 +1169,9 @@ def uninstall(args):
     ENABLED.unlink(missing_ok=True)
     SITE.unlink(missing_ok=True)
     HOOK.unlink(missing_ok=True)
+    hash_path = nginx_hash_path()
+    if hash_path.exists() and hash_path.read_text() == NGINX_HASH_SETTINGS:
+        hash_path.unlink()
     if shutil.which('nginx'):
         run(['nginx', '-t'])
         if run(['systemctl', 'is-active', '--quiet', 'nginx'], check=False).returncode == 0:
@@ -1296,7 +1345,8 @@ def uninstall_menu():
 def menu():
     while True:
         s = load()
-        state = 'not installed' if not s else 'enabled' if s.get('enabled', True) else 'disabled'
+        state = ('not installed' if not s else 'incomplete' if not s.get('complete')
+                 else 'enabled' if s.get('enabled', True) else 'disabled')
         print(f'\nTelegram Web Proxy Wizard — {state}')
         print('1) Install / reinstall')
         print('2) Configure')
