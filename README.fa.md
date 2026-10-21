@@ -77,7 +77,6 @@ CDNهای دیگر اختیاری است. TLS معتبر مبدأ، WebSocket و
   <img src="https://nowpayments.io/images/embeds/donation-button-white.svg" alt="Cryptocurrency & Bitcoin donation button by NOWPayments">
 </a>
 
-برای نام‌های چندسطحی کلودفلیر، [راهنمای SSL](CLOUDFLARE.md) را ببین.
 
 گزینهٔ **۸ — Links** همهٔ لینک‌های کامل `tg://webproxy` را در خط‌های جدا
 نمایش می‌دهد. رنگ لینک‌ها در ترمینال سبز است؛ `NO_COLOR=1` رنگ را غیرفعال می‌کند.
