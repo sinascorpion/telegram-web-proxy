@@ -76,3 +76,5 @@ CDNهای دیگر اختیاری است. TLS معتبر مبدأ، WebSocket و
 <a href="https://nowpayments.io/donation?api_key=8b06749b-45a1-43aa-983f-986d9d6f38cf" target="_blank" rel="noreferrer noopener">
   <img src="https://nowpayments.io/images/embeds/donation-button-white.svg" alt="Cryptocurrency & Bitcoin donation button by NOWPayments">
 </a>
+
+برای نام‌های چندسطحی کلودفلیر، [راهنمای SSL](CLOUDFLARE.md) را ببین.

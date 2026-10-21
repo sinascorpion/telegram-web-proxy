@@ -878,7 +878,8 @@ def check_certificate_eligibility(profile):
             "Let's Encrypt supports at most 10 DNS labels (dot-separated parts). "
             "This hostname needs a matching certificate from another issuer before installation; "
             "NGINX supports the hostname, but changing NGINX or the challenge port cannot fix this CA restriction. "
-            "A CDN also needs an edge certificate covering the exact hostname.")
+            "A CDN also needs an edge certificate covering the exact hostname. "
+            "Cloudflare setup: https://github.com/sinascorpion/telegram-web-proxy/blob/main/CLOUDFLARE.md")
 
 
 def install(args):
