@@ -4,6 +4,8 @@ Platform: Ubuntu 24.04 amd64. Core: pinned 3.5.14 release with verified SHA-256.
 
 ## Automated checks
 
+Current suite: 49 passing tests on Ubuntu 24.04.
+
 - Domain and configuration-injection rejection, secret/tag validation.
 - Restoring raw/dd-prefixed WEB secrets keeps the exact link; Enter preserves an
   existing secret or generates one only on a new installation. Invalid interactive
@@ -21,6 +23,10 @@ Platform: Ubuntu 24.04 amd64. Core: pinned 3.5.14 release with verified SHA-256.
 - Disable/enable, failed activation, menu action routing and retaining/removing
   the management command are covered by isolated Linux lifecycle tests.
 - Unix permission checks cover the executable under restrictive bootstrap umask.
+- Uninstall menu covers whole-install removal, unique-domain listing, removing all
+  profiles of a selected domain, preserving credentials used by other domains,
+  retaining SSL and cancelling without side effects. Removing the final domain
+  retains installed packages and the management command.
 
 ## Multiple profiles — 2026-10-21
 

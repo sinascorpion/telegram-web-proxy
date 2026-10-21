@@ -216,7 +216,7 @@ class ManagementTests(unittest.TestCase):
         self.assertFalse((m.CERT_ROOT/'mtproxy-web-retained').exists())
 
     def test_menu_routes_selected_actions_and_stops_after_full_removal(self):
-        with patch('builtins.input', side_effect=['5','6','3','4','9','y','y','n']), \
+        with patch('builtins.input', side_effect=['5','6','3','4','9','1','y','y','n']), \
              patch.object(m, 'set_enabled') as enabled, \
              patch.object(m, 'change_domain') as domain, \
              patch.object(m, 'change_secret') as secret, \
@@ -226,6 +226,53 @@ class ManagementTests(unittest.TestCase):
         domain.assert_called_once()
         secret.assert_called_once()
         self.assertTrue(remove.call_args.args[0].remove_manager)
+
+    def test_remove_domain_removes_all_its_profiles_but_preserves_shared_credentials_elsewhere(self):
+        second = {**self.old,'domain':'two.example.com'}
+        extra = {**self.old,'secret':'34'*16,'ad_tag':'56'*16}
+        args = m.configured_args()
+        args._profiles = [self.old,extra,second]
+        m.install(args)
+        with patch('builtins.input',side_effect=['1','y']):
+            m.remove_domain()
+        items = m.load()['profiles']
+        self.assertEqual([p['domain'] for p in items],['two.example.com'])
+        self.assertEqual(items[0]['secret'],self.old['secret'])
+        self.assertNotIn('old.example.com',m.CONFIG.read_text())
+        self.assertNotIn('34'*16,m.CONFIG.read_text())
+        self.assertNotIn('56'*16,m.CONFIG.read_text())
+        self.assertNotIn('server_name old.example.com',m.SITE.read_text())
+        self.assertTrue((m.CERT_ROOT/'mtproxy-web-retained'/(self.old['cert_name']+'.conf')).exists())
+        self.assertTrue((m.CERT_ROOT/'live'/self.old['cert_name']/'fullchain.pem').exists())
+
+    def test_remove_last_domain_retains_management_command_packages_and_ssl(self):
+        m.install_manager()
+        self.calls.clear()
+        with patch('builtins.input',side_effect=['1','y']):
+            m.remove_domain()
+        self.assertFalse(m.STATE.exists())
+        self.assertTrue(m.owned_manager())
+        self.assertFalse(any(c[:2]==['apt-get','purge'] for c in self.calls))
+        self.assertTrue((m.CERT_ROOT/'mtproxy-web-retained'/(self.old['cert_name']+'.conf')).exists())
+
+    def test_domain_removal_can_be_cancelled_without_service_or_config_changes(self):
+        original=m.STATE.read_bytes()
+        for answers in (['0'],['1','n']):
+            with patch('builtins.input',side_effect=answers):
+                m.remove_domain()
+        self.assertEqual(m.STATE.read_bytes(),original)
+        self.assertEqual(self.calls,[])
+
+    def test_uninstall_submenu_lists_domains_and_returns_to_main_without_removal(self):
+        output=io.StringIO()
+        with patch('builtins.input',side_effect=['9','2','0','0']) as entry, \
+             contextlib.redirect_stdout(output):
+            m.menu()
+        self.assertIn('Remove the entire proxy',output.getvalue())
+        self.assertIn('Remove one domain',output.getvalue())
+        self.assertIn('1) old.example.com',output.getvalue())
+        self.assertTrue(all(call.args[0]=='Select: ' for call in entry.call_args_list))
+        self.assertEqual(self.calls,[])
 
     def test_multiple_domains_secrets_tags_and_origin_ports(self):
         second = {**self.old, 'domain': 'two.example.com', 'secret': '34'*16,

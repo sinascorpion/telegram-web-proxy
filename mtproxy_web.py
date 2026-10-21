@@ -975,8 +975,12 @@ def install(args):
                     delete_certificate(name, check=False)
         raise
     for old_cert in known_certs:
-        if old_cert not in target_certs and delete_certificate(old_cert, check=False):
-            s['cert_names'].remove(old_cert)
+        if old_cert not in target_certs:
+            if getattr(args, '_retain_removed_certificates', False):
+                retain_certificate(old_cert)
+                s['cert_names'].remove(old_cert)
+            elif delete_certificate(old_cert, check=False):
+                s['cert_names'].remove(old_cert)
     save(s)
     print('\nsinascorpion — Installed' + '\n'.join(link(p) for p in items))
     print('Management: mtproxy-web configure | status | link | uninstall')
@@ -1181,7 +1185,7 @@ def manage_profiles():
         for index, p in enumerate(items, 1):
             print(f'{index}) {p["domain"]} — {p.get("cdn_provider", "none")}')
         print('1) Add')
-        choice = input('Select').strip()
+        choice = input('Select: ').strip()
         if choice == '0':
             return
         if choice == '4':
@@ -1209,6 +1213,61 @@ def manage_profiles():
         install(args)
 
 
+def remove_domain():
+    s = load()
+    if not s:
+        print('Nothing installed')
+        return
+    items = profile_list(s)
+    domains = list(dict.fromkeys(p['domain'] for p in items))
+    print('\nInstalled domains:')
+    for index, domain in enumerate(domains, 1):
+        group = [p for p in items if p['domain'] == domain]
+        secrets_count = len({p['secret'] for p in group})
+        tags_count = len({p['ad_tag'] for p in group if p.get('ad_tag')})
+        print(f'{index}) {domain} — {secrets_count} secret(s), {tags_count} sponsor tag(s)')
+    print('0) Back')
+    selected = input('Select: ').strip()
+    if selected == '0':
+        return
+    index = int(selected) - 1
+    if not 0 <= index < len(domains):
+        raise ValueError('Invalid domain number')
+    domain = domains[index]
+    remaining = [dict(p) for p in items if p['domain'] != domain]
+    if not remaining:
+        print('This is the last domain. Proxy services will be removed; packages, SSL and the management command will be kept.')
+    if prompt(f'Remove {domain} and its secrets/tags? y/n', 'n').lower() != 'y':
+        return
+    if remaining:
+        args = configured_args()
+        args._profiles = remaining
+        args._retain_removed_certificates = True
+        install(args)
+    else:
+        uninstall(argparse.Namespace(yes=True, purge_dependencies=False, remove_manager=False,
+                                     delete_certificate=False))
+    print(f'Domain removed: {domain}')
+
+
+def uninstall_menu():
+    while True:
+        print('\nUninstall\n1) Remove the entire proxy\n2) Remove one domain and its secrets/tags\n0) Back')
+        choice = input('Select: ').strip()
+        if choice == '0':
+            return False
+        if choice == '2':
+            remove_domain()
+            return False
+        if choice == '1':
+            purge = prompt('Remove installer-added packages?', 'y').lower() == 'y'
+            remove = prompt('Remove management command too?', 'n').lower() == 'y'
+            delete_cert = prompt('Delete SSL certificate too?', 'n').lower() == 'y'
+            return bool(uninstall(argparse.Namespace(yes=False, purge_dependencies=purge, remove_manager=remove,
+                                                     delete_certificate=delete_cert)) and remove)
+        print('Invalid choice')
+
+
 def menu():
     while True:
         s = load()
@@ -1225,7 +1284,7 @@ def menu():
         print('9) Uninstall')
         print('10) Domains / secrets / tags')
         print('0) Exit')
-        choice = input('Select').strip()
+        choice = input('Select: ').strip()
         if choice == '0':
             return
         try:
@@ -1250,11 +1309,7 @@ def menu():
                     raise RuntimeError('Install first')
                 print('\n'.join(link(p) for p in profile_list(s)))
             elif choice == '9':
-                purge = prompt('Remove installer-added packages?', 'y').lower() == 'y'
-                remove = prompt('Remove management command too?', 'n').lower() == 'y'
-                delete_cert = prompt('Delete SSL certificate too?', 'n').lower() == 'y'
-                if uninstall(argparse.Namespace(yes=False, purge_dependencies=purge, remove_manager=remove,
-                                                delete_certificate=delete_cert)) and remove:
+                if uninstall_menu():
                     return
             elif choice == '10':
                 manage_profiles()

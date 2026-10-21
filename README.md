@@ -43,6 +43,8 @@ sudo sinascorpion-webproxy
 The menu offers reinstall, configuration, domain/secret changes, enable/disable,
 status, links, profile management and uninstall. To update an older installation,
 rerun the install command and select **1**.
+Under **9 — Uninstall**, remove the entire proxy or select one domain and all its
+associated secrets/tags. Other domains remain configured; SSL is retained for reuse.
 
 Valid SSL is reused on the same server/domain, including after a secret change.
 Uninstall keeps certificates by default; choose certificate deletion for a full
