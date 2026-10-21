@@ -77,8 +77,3 @@ License: [LICENSE](LICENSE) · Dependency notices: [NOTICE.md](NOTICE.md).
 <a href="https://nowpayments.io/donation?api_key=8b06749b-45a1-43aa-983f-986d9d6f38cf" target="_blank" rel="noreferrer noopener">
   <img src="https://nowpayments.io/images/embeds/donation-button-white.svg" alt="Cryptocurrency & Bitcoin donation button by NOWPayments">
 </a>
-
-Cloudflare deep hostnames: see the [SSL setup guide](CLOUDFLARE.md).
-
-Select **8 — Links** to list every full `tg://webproxy` link. Links are shown
-on separate lines in green on interactive terminals; `NO_COLOR=1` disables colors.
