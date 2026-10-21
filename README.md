@@ -79,3 +79,6 @@ License: [LICENSE](LICENSE) · Dependency notices: [NOTICE.md](NOTICE.md).
 </a>
 
 Cloudflare deep hostnames: see the [SSL setup guide](CLOUDFLARE.md).
+
+Select **8 — Links** to list every full `tg://webproxy` link. Links are shown
+on separate lines in green on interactive terminals; `NO_COLOR=1` disables colors.

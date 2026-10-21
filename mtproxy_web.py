@@ -851,6 +851,30 @@ def wait_backend():
     raise RuntimeError('WEB listener did not become ready. Run: mtproxy-web status')
 
 
+def terminal_style(text, code):
+    if sys.stdout.isatty() and 'NO_COLOR' not in os.environ and os.environ.get('TERM') != 'dumb':
+        return f'\033[{code}m{text}\033[0m'
+    return text
+
+
+def show_banner():
+    print()
+    print(terminal_style('  +==================================================+', '1;95'))
+    print(terminal_style('  |' + 'sinascorpion'.center(50) + '|', '1;96'))
+    print(terminal_style('  |' + 'TELEGRAM WEB PROXY WIZARD'.center(50) + '|', '95'))
+    print(terminal_style('  +==================================================+', '1;95'))
+
+
+def show_links(state):
+    items = profile_list(state)
+    print(terminal_style('\n  WEB PROXY LINKS', '1;96'))
+    for index, profile in enumerate(items, 1):
+        print(terminal_style(f'\n  [{index}] {profile["domain"]}', '1;97'))
+        print()
+        print(terminal_style(link(profile), '1;92'))
+    print()
+
+
 def link(s):
     return 'tg://webproxy?' + urllib.parse.urlencode({'server': s['domain'], 'secret': 'dd' + s['secret']})
 
@@ -1063,7 +1087,8 @@ def install(args):
             elif delete_certificate(old_cert, check=False):
                 s['cert_names'].remove(old_cert)
     save(s)
-    print('\nsinascorpion — Installed' + '\n'.join(link(p) for p in items))
+    print(terminal_style('\n  Installation complete', '1;92'))
+    show_links(s)
     print('Management: mtproxy-web configure | status | link | uninstall')
     print('Open the management menu any time: sinascorpion-webproxy (or sudo sinascorpion-webproxy)')
     if s['cdn']:
@@ -1360,7 +1385,8 @@ def menu():
         s = load()
         state = ('not installed' if not s else 'incomplete' if not s.get('complete')
                  else 'enabled' if s.get('enabled', True) else 'disabled')
-        print(f'\nTelegram Web Proxy Wizard — {state}')
+        show_banner()
+        print(terminal_style(f'\n  Status: {state}\n', '1;93'))
         print('1) Install / reinstall')
         print('2) Configure')
         print('3) Change domain')
@@ -1368,7 +1394,7 @@ def menu():
         print('5) Disable')
         print('6) Enable')
         print('7) Status')
-        print('8) Show link')
+        print(terminal_style('8) Links - all web proxy links', '1;92'))
         print('9) Uninstall')
         print('10) Domains / secrets / tags')
         print('0) Exit')
@@ -1395,7 +1421,7 @@ def menu():
             elif choice == '8':
                 if not s:
                     raise RuntimeError('Install first')
-                print('\n'.join(link(p) for p in profile_list(s)))
+                show_links(s)
             elif choice == '9':
                 if uninstall_menu():
                     return
