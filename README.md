@@ -10,7 +10,9 @@ Each domain serves a lightweight website with its own stable name, colors and ar
 
 Use a dedicated Ubuntu server (Ubuntu 24.04 is recommended). Point your domain
 to the server and allow ports **80** and **443**. Use a Telegram client that
-supports `tg://webproxy`.
+supports `tg://webproxy`. Automatic SSL uses Let's Encrypt, which accepts up to
+10 dot-separated hostname parts. Deeper hostnames require a matching certificate
+from another issuer; a CDN also needs an edge certificate covering that hostname.
 
 ```bash
 curl -fsSLo /tmp/telegram-web-proxy-install.sh https://raw.githubusercontent.com/sinascorpion/telegram-web-proxy/main/install.sh && sudo bash /tmp/telegram-web-proxy-install.sh

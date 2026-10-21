@@ -871,6 +871,16 @@ def check_os():
         raise RuntimeError('Only amd64 and arm64 are supported')
 
 
+def check_certificate_eligibility(profile):
+    domain = profile['domain']
+    if len(domain.split('.')) > 10 and not certificate_usable(profile['cert_name'], domain):
+        raise ValueError(
+            "Let's Encrypt supports at most 10 DNS labels (dot-separated parts). "
+            "This hostname needs a matching certificate from another issuer before installation; "
+            "NGINX supports the hostname, but changing NGINX or the challenge port cannot fix this CA restriction. "
+            "A CDN also needs an edge certificate covering the exact hostname.")
+
+
 def install(args):
     check_os()
     previous = load()
@@ -887,6 +897,8 @@ def install(args):
         else:
             items = [updated]
         items = validate_profiles(items)
+    for profile in items:
+        check_certificate_eligibility(profile)
     s = {**items[0], 'profiles': items}
     target_certs = list(dict.fromkeys(p['cert_name'] for p in items))
     known_certs = owned_certificates(previous) if previous else []

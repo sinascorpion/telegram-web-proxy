@@ -96,6 +96,22 @@ class ManagementTests(unittest.TestCase):
         self.assertIn('Installation incomplete', output.getvalue())
         self.assertFalse(self.calls)
 
+    def test_deep_hostname_is_rejected_before_issuance(self):
+        profile = dict(self.old, domain='.'.join(['sub']*9 + ['example', 'com']))
+        with patch.object(m, 'certificate_usable', return_value=False):
+            with self.assertRaisesRegex(ValueError, 'at most 10 DNS labels'):
+                m.check_certificate_eligibility(profile)
+        self.assertFalse(self.calls)
+
+    def test_deep_hostname_can_reuse_matching_certificate(self):
+        profile = dict(self.old, domain='.'.join(['sub']*9 + ['example', 'com']))
+        m.check_certificate_eligibility(profile)
+
+    def test_ten_label_hostname_can_request_certificate(self):
+        profile = dict(self.old, domain='.'.join(['sub']*8 + ['example', 'com']))
+        with patch.object(m, 'certificate_usable', return_value=False):
+            m.check_certificate_eligibility(profile)
+
     def make_certificate(self, name):
         m.write(m.CERT_ROOT/'live'/name/'fullchain.pem', 'test certificate')
         m.write(m.CERT_ROOT/'renewal'/(name+'.conf'), 'test renewal')
