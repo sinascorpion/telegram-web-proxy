@@ -49,6 +49,7 @@ associated secrets/tags. Other domains remain configured; SSL is retained for re
 Valid SSL is reused on the same server/domain, including after a secret change.
 Uninstall keeps certificates by default; choose certificate deletion for a full
 cleanup. Keep the same domain and secret when restoring existing client links.
+Reinstall recognizes the retained default NGINX; SSL validation keeps it running.
 
 ## CDN and sponsor tags
 

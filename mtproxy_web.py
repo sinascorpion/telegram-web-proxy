@@ -42,6 +42,7 @@ BIN = Path('/usr/local/lib/mtproxy-web/telemt')
 UNIT = Path('/etc/systemd/system/mtproxy-web.service')
 SITE = Path('/etc/nginx/sites-available/mtproxy-web.conf')
 ENABLED = Path('/etc/nginx/sites-enabled/mtproxy-web.conf')
+NGINX_ROOT = Path('/etc/nginx')
 CERT_ROOT = Path('/etc/letsencrypt')
 HOOK = CERT_ROOT / 'renewal-hooks/deploy/mtproxy-web-reload'
 USER = 'mtproxy-web'
@@ -302,6 +303,26 @@ def installed_packages():
     result = run(['dpkg-query', '-W', '-f=${binary:Package}\t${db:Status-Status}\n'], capture=True)
     return sorted(line.split('\t')[0] for line in result.stdout.splitlines()
                   if line.endswith('\tinstalled'))
+
+
+def stock_nginx_only():
+    """Recognize an unchanged Ubuntu default server, never a custom NGINX site."""
+    conf = NGINX_ROOT / 'conf.d'
+    enabled = NGINX_ROOT / 'sites-enabled'
+    default = NGINX_ROOT / 'sites-available/default'
+    if not enabled.is_dir() or (conf.exists() and any(conf.iterdir())):
+        return False
+    entries = list(enabled.iterdir())
+    if len(entries) != 1 or entries[0].name != 'default' or entries[0].resolve() != default.resolve():
+        return False
+    result = run(['dpkg-query', '-W', '-f=${Conffiles}', 'nginx-common'], capture=True, check=False)
+    if result.returncode:
+        return False
+    hashes = dict(re.findall(r'^\s*(/\S+)\s+([0-9a-f]{32})(?:\s+obsolete)?\s*$', result.stdout, re.M))
+    for path in (NGINX_ROOT / 'nginx.conf', default):
+        if not path.is_file() or hashlib.md5(path.read_bytes()).hexdigest() != hashes.get(str(path)):
+            return False
+    return True
 
 
 def normalize_domain(value):
@@ -843,12 +864,16 @@ def install(args):
     if not previous:
         if run(['id', '-u', USER], capture=True, check=False).returncode == 0:
             raise RuntimeError('Service account already exists and is not managed by this installer.')
+        has_manager = owned_manager()
         for port in {80, BACKEND_PORT, API_PORT, *(p['origin_port'] for p in items)}:
             try:
                 port_available(port)
             except OSError as e:
+                if (port == 80 and has_manager and stock_nginx_only()
+                        and run(['systemctl', 'is-active', '--quiet', 'nginx'], check=False).returncode == 0):
+                    print('Reusing the retained default NGINX server for HTTP-01 SSL validation.')
+                    continue
                 raise RuntimeError(f'Port {port} is occupied. Use a clean/dedicated server.') from e
-        has_manager = owned_manager()
         for path in (SITE, ENABLED, CONFIG, UNIT, CLI, MANAGER, BIN):
             if has_manager and path in (CLI, MANAGER):
                 continue

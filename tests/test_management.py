@@ -28,7 +28,8 @@ class ManagementTests(unittest.TestCase):
         paths = dict(ETC=root/'etc', STATE=root/'etc/state.json', CONFIG=root/'etc/telemt.toml',
                      DATA=root/'data', CLI=root/'sbin/mtproxy-web', MANAGER=root/'bin/sinascorpion-webproxy',
                      BIN=root/'lib/telemt', UNIT=root/'units/proxy.service', SITE=root/'nginx/proxy.conf',
-                     ENABLED=root/'nginx/enabled', HOOK=root/'certs/hook', CERT_ROOT=root/'certs')
+                     ENABLED=root/'nginx/enabled', HOOK=root/'certs/hook', CERT_ROOT=root/'certs',
+                     NGINX_ROOT=root/'nginx-root')
         for name, value in paths.items():
             self.stack.enter_context(patch.object(m, name, value))
         self.old = dict(domain='old.example.com', secret='12'*16, email='', ad_tag='', cdn=False,
@@ -176,7 +177,11 @@ class ManagementTests(unittest.TestCase):
         self.calls.clear()
         args = m.parser().parse_args(['install','--non-interactive','--domain',self.old['domain'],
                                       '--public-ip','8.8.8.8','--secret','34'*16])
-        with patch.object(m, 'port_available'), \
+        def port_check(port):
+            if port == 80:
+                raise OSError('retained nginx is listening')
+        with patch.object(m, 'port_available',side_effect=port_check), \
+             patch.object(m, 'stock_nginx_only',return_value=True), \
              patch.object(m, 'install_binary', side_effect=lambda: m.write(m.BIN, 'fresh core', 0o755)):
             m.install(args)
         self.assertTrue(m.load()['complete'])
@@ -185,6 +190,52 @@ class ManagementTests(unittest.TestCase):
         self.assertFalse(any(c[:2] == ['certbot', 'certonly'] for c in self.calls))
         self.assertTrue((m.CERT_ROOT/'renewal'/(self.old['cert_name']+'.conf')).exists())
         self.assertFalse((m.CERT_ROOT/'mtproxy-web-retained').exists())
+        self.assertIn(['systemctl','enable','--now','nginx','certbot.timer'],self.calls)
+        self.assertFalse(any(c[:2]==['systemctl','stop'] for c in self.calls))
+
+    def test_stock_nginx_detector_refuses_modified_or_additional_configs(self):
+        main=m.NGINX_ROOT/'nginx.conf'
+        default=m.NGINX_ROOT/'sites-available/default'
+        enabled=m.NGINX_ROOT/'sites-enabled'
+        conf=m.NGINX_ROOT/'conf.d'
+        m.write(main,'packaged main config')
+        m.write(default,'packaged default site')
+        enabled.mkdir()
+        conf.mkdir()
+        (enabled/'default').symlink_to(default)
+        import hashlib
+        hashes=''.join(f' {p} {hashlib.md5(p.read_bytes()).hexdigest()}\n' for p in (main,default))
+        with patch.object(m,'run',return_value=subprocess.CompletedProcess([],0,stdout=hashes)):
+            self.assertTrue(m.stock_nginx_only())
+            m.write(main,'custom main config')
+            self.assertFalse(m.stock_nginx_only())
+            m.write(main,'packaged main config')
+            m.write(conf/'extra.conf','server {}')
+            self.assertFalse(m.stock_nginx_only())
+            (conf/'extra.conf').unlink()
+            (enabled/'another').symlink_to(default)
+            self.assertFalse(m.stock_nginx_only())
+            (enabled/'another').unlink()
+            m.write(default,'custom default site')
+            self.assertFalse(m.stock_nginx_only())
+
+    def test_fresh_install_still_refuses_an_unknown_port_80_listener(self):
+        self.old['created_user']=True
+        m.save(self.old)
+        m.install_manager()
+        m.uninstall(m.parser().parse_args(['uninstall','--yes']))
+        self.calls.clear()
+        args=m.parser().parse_args(['install','--non-interactive','--domain',self.old['domain'],
+                                   '--public-ip','8.8.8.8'])
+        def port_check(port):
+            if port==80:
+                raise OSError('another service')
+        with patch.object(m,'port_available',side_effect=port_check), \
+             patch.object(m,'stock_nginx_only',return_value=False), \
+             self.assertRaisesRegex(RuntimeError,'Port 80'):
+            m.install(args)
+        self.assertFalse(m.STATE.exists())
+        self.assertFalse(any(c[0] in ('kill','pkill','killall') or c[:2]==['systemctl','stop'] for c in self.calls))
 
     def test_secret_change_reuses_certificate_without_issuance(self):
         args = m.parser().parse_args(['configure', '--non-interactive', '--secret', '34'*16])

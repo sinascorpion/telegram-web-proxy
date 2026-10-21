@@ -4,7 +4,7 @@ Platform: Ubuntu 24.04 amd64. Core: pinned 3.5.14 release with verified SHA-256.
 
 ## Automated checks
 
-Current suite: 49 passing tests on Ubuntu 24.04.
+Current suite: 51 passing tests on Ubuntu 24.04.
 
 - Domain and configuration-injection rejection, secret/tag validation.
 - Restoring raw/dd-prefixed WEB secrets keeps the exact link; Enter preserves an
@@ -27,6 +27,10 @@ Current suite: 49 passing tests on Ubuntu 24.04.
   profiles of a selected domain, preserving credentials used by other domains,
   retaining SSL and cancelling without side effects. Removing the final domain
   retains installed packages and the management command.
+- Reinstall accepts port 80 held by an active, pristine Ubuntu default NGINX with
+  a retained owned manager, while keeping NGINX running and enabled after setup.
+  Modified configurations and other occupied listeners remain protected. The
+  default-only detector was also verified against the retained live NGINX.
 
 ## Multiple profiles — 2026-10-21
 
